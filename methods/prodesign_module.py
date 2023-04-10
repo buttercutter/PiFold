@@ -1,3 +1,4 @@
+from .common import Linear
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,20 +26,20 @@ class NeighborAttention(nn.Module):
         self.edge_drop = edge_drop
         self.output_mlp = output_mlp
         
-        self.W_V = nn.Sequential(nn.Linear(num_in, num_hidden),
+        self.W_V = nn.Sequential(Linear(num_in, num_hidden),
                                 nn.GELU(),
-                                nn.Linear(num_hidden, num_hidden),
+                                Linear(num_hidden, num_hidden),
                                 nn.GELU(),
-                                nn.Linear(num_hidden, num_hidden)
+                                Linear(num_hidden, num_hidden)
         )
         self.Bias = nn.Sequential(
-                                nn.Linear(num_hidden*3, num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_heads)
+                                Linear(num_hidden*3, num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_heads)
                                 )
-        self.W_O = nn.Linear(num_hidden, num_hidden, bias=False)
+        self.W_O = Linear(num_hidden, num_hidden, bias=False)
 
     def forward(self, h_V, h_E, center_id, batch_id, dst_idx=None):
         N = h_V.shape[0]
@@ -69,9 +70,9 @@ class EdgeMLP(nn.Module):
         self.scale = scale
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.BatchNorm1d(num_hidden)
-        self.W11 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
-        self.W12 = nn.Linear(num_hidden, num_hidden, bias=True)
-        self.W13 = nn.Linear(num_hidden, num_hidden, bias=True)
+        self.W11 = Linear(num_hidden + num_in, num_hidden, bias=True)
+        self.W12 = Linear(num_hidden, num_hidden, bias=True)
+        self.W13 = Linear(num_hidden, num_hidden, bias=True)
         self.act = torch.nn.GELU()
 
     def forward(self, h_V, h_E, edge_idx, batch_id):
@@ -94,36 +95,36 @@ class Context(nn.Module):
         self.edge_context = edge_context
 
         self.V_MLP = nn.Sequential(
-                                nn.Linear(num_hidden, num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
+                                Linear(num_hidden, num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
                                 )
         
         self.V_MLP_g = nn.Sequential(
-                                nn.Linear(num_hidden, num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
+                                Linear(num_hidden, num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
                                 nn.Sigmoid()
                                 )
 
         self.E_MLP = nn.Sequential(
-                                nn.Linear(num_hidden, num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden)
+                                Linear(num_hidden, num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden)
                                 )
         
         self.E_MLP_g = nn.Sequential(
-                                nn.Linear(num_hidden, num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
-                                nn.ReLU(),
-                                nn.Linear(num_hidden,num_hidden),
+                                Linear(num_hidden, num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
+                                nn.GELU(),
+                                Linear(num_hidden,num_hidden),
                                 nn.Sigmoid()
                                 )
 
@@ -162,13 +163,13 @@ class GeneralGNN(nn.Module):
         self.context = Context(num_hidden, num_in, num_heads=4, node_context=node_context, edge_context=edge_context)
 
         self.dense = nn.Sequential(
-            nn.Linear(num_hidden, num_hidden*4),
-            nn.ReLU(),
-            nn.Linear(num_hidden*4, num_hidden)
+            Linear(num_hidden, num_hidden*4),
+            nn.GELU(),
+            Linear(num_hidden*4, num_hidden)
         )
-        self.W11 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
-        self.W12 = nn.Linear(num_hidden, num_hidden, bias=True)
-        self.W13 = nn.Linear(num_hidden, num_hidden, bias=True)
+        self.W11 = Linear(num_hidden + num_in, num_hidden, bias=True)
+        self.W12 = Linear(num_hidden, num_hidden, bias=True)
+        self.W13 = Linear(num_hidden, num_hidden, bias=True)
         self.act = torch.nn.GELU()
 
     def forward(self, h_V, h_E, edge_idx, batch_id):
@@ -218,7 +219,7 @@ class StructureEncoder(nn.Module):
 class MLPDecoder(nn.Module):
     def __init__(self, hidden_dim, vocab=20):
         super().__init__()
-        self.readout = nn.Linear(hidden_dim, vocab)
+        self.readout = Linear(hidden_dim, vocab)
     
     def forward(self, h_V, batch_id=None):
         logits = self.readout(h_V)

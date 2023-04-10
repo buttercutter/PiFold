@@ -1,3 +1,4 @@
+from .common import Linear
 import time
 import torch
 import torch.nn as nn
@@ -52,23 +53,23 @@ class ProDesign_Model(nn.Module):
         if self.args.edge_direct:
             edge_in += 12
 
-        self.node_embedding = nn.Linear(node_in, node_features, bias=True)
-        self.edge_embedding = nn.Linear(edge_in, edge_features, bias=True)
+        self.node_embedding = Linear(node_in, node_features, bias=True)
+        self.edge_embedding = Linear(edge_in, edge_features, bias=True)
         self.norm_nodes = nn.BatchNorm1d(node_features)
         self.norm_edges = nn.BatchNorm1d(edge_features)
 
         self.W_v = nn.Sequential(
-            nn.Linear(node_features, hidden_dim, bias=True),
+            Linear(node_features, hidden_dim, bias=True),
             nn.LeakyReLU(),
             nn.BatchNorm1d(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim, bias=True),
+            Linear(hidden_dim, hidden_dim, bias=True),
             nn.LeakyReLU(),
             nn.BatchNorm1d(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim, bias=True)
+            Linear(hidden_dim, hidden_dim, bias=True)
         )
         
-        self.W_e = nn.Linear(edge_features, hidden_dim, bias=True) 
-        self.W_f = nn.Linear(edge_features, hidden_dim, bias=True)
+        self.W_e = Linear(edge_features, hidden_dim, bias=True) 
+        self.W_f = Linear(edge_features, hidden_dim, bias=True)
 
         self.encoder = StructureEncoder(hidden_dim, num_encoder_layers, dropout)
 
