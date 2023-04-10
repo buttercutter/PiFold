@@ -21,7 +21,7 @@ class ProDesign(Base_method):
 
     def train_one_epoch(self, train_loader):
         self.model.train()
-        train_sum, train_weights = 0.0, 0.0
+        train_sum, train_weights = 0, 1e-7
 
         train_pbar = tqdm(train_loader)
         for step_idx, batch in enumerate(train_pbar):
@@ -48,21 +48,29 @@ class ProDesign(Base_method):
             self.optimizer.step()
             self.scheduler.step()
 
-            train_sum += torch.sum(loss * mask).cpu().data.numpy()
-            train_weights += torch.sum(mask).cpu().data.numpy()
-            train_pbar.set_description("train loss: {:.4f}".format(loss.item()))
+            if isinstance(train_sum, int):
+                train_sum = torch.sum(loss * mask)
+                train_weights = torch.sum(mask)
+            else:
+                train_sum += torch.sum(loss * mask)
+                train_weights += torch.sum(mask)
+
+            if step_idx % self.args.display_step == 0:
+                train_pbar.set_description("train loss: {:.4f}".format(loss.item()))
 
         train_loss = train_sum / train_weights
+        if isinstance(train_loss, torch.Tensor):
+            train_loss = train_loss.cpu().data.numpy()
         train_perplexity = np.exp(train_loss)
         return train_loss, train_perplexity
 
     def valid_one_epoch(self, valid_loader):
         self.model.eval()
         valid_sum, valid_weights = 0, 1e-7
-        valid_pbar = tqdm(valid_loader)
 
+        valid_pbar = tqdm(valid_loader)
         with torch.no_grad():
-            for batch in valid_pbar:
+            for step_idx, batch in enumerate(valid_pbar):
                 X, S, score, mask, lengths = cuda(batch, device=self.device)
                 (
                     X,
@@ -86,9 +94,10 @@ class ProDesign(Base_method):
                     valid_sum += torch.sum(loss * mask)
                     valid_weights += torch.sum(mask)
 
-                valid_pbar.set_description(
-                    "valid loss: {:.4f}".format(loss.mean().item())
-                )
+                if step_idx % self.args.display_step == 0:
+                    valid_pbar.set_description(
+                        "valid loss: {:.4f}".format(loss.mean().item())
+                    )
 
             valid_loss = valid_sum / valid_weights
             if isinstance(valid_loss, torch.Tensor):
@@ -98,11 +107,11 @@ class ProDesign(Base_method):
 
     def test_one_epoch(self, test_loader):
         self.model.eval()
-        test_sum, test_weights = 0.0, 0.0
+        test_sum, test_weights = 0, 1e-7
         test_pbar = tqdm(test_loader)
 
         with torch.no_grad():
-            for batch in test_pbar:
+            for step_idx, batch in enumerate(test_pbar):
                 X, S, score, mask, lengths = cuda(batch, device=self.device)
                 (
                     X,
@@ -118,20 +127,29 @@ class ProDesign(Base_method):
                 ) = self.model._get_features(S, score, X=X, mask=mask)
                 log_probs = self.model(h_V, h_E, E_idx, batch_id)
                 loss, loss_av = self.loss_nll_flatten(S, log_probs)
+                # TODO: hypnopump@ wtf ???
                 mask = torch.ones_like(loss)
-                test_sum += torch.sum(loss * mask).cpu().data.numpy()
-                test_weights += torch.sum(mask).cpu().data.numpy()
-                test_pbar.set_description(
-                    "test loss: {:.4f}".format(loss.mean().item())
-                )
+
+                if isinstance(test_sum, int):
+                    test_sum = torch.sum(loss * mask)
+                    test_weights = torch.sum(mask)
+                else:
+                    test_sum += torch.sum(loss * mask)
+                    test_weights += torch.sum(mask)
+
+                if step_idx % self.args.display_step == 0:
+                    test_pbar.set_description(
+                        "test loss: {:.4f}".format(loss.mean().item())
+                    )
 
             test_recovery, test_subcat_recovery = self._cal_recovery(
                 test_loader.dataset, test_loader.featurizer
             )
 
         test_loss = test_sum / test_weights
+        if isinstance(test_loss, torch.Tensor):
+            test_loss = test_loss.cpu().data.numpy()
         test_perplexity = np.exp(test_loss)
-
         return test_perplexity, test_recovery, test_subcat_recovery
 
     def _cal_recovery(self, dataset, featurizer):

@@ -8,9 +8,13 @@ import torch
 
 warnings.filterwarnings("ignore")
 
+import logging
+
 from API import Recorder
 from methods import ProDesign
 from utils import *
+
+logger = logging.getLogger(__name__)
 
 
 class Exp:
@@ -73,6 +77,10 @@ class Exp:
             train_loss, train_perplexity = self.method.train_one_epoch(
                 self.train_loader
             )
+            if args.wandb_project:
+                wandb.log(
+                    {"Train/Loss": train_loss, "Train/Perplexity": train_perplexity}
+                )
 
             if epoch % self.args.log_step == 0:
                 with torch.no_grad():
@@ -82,13 +90,10 @@ class Exp:
                     self.test()
 
                 print_log(
-                    "Epoch: {0}, Steps: {1} | Train Loss: {2:.4f} Train Perp: {3:.4f} Valid Loss: {4:.4f} Valid Perp: {5:.4f}\n".format(
-                        epoch + 1,
-                        len(self.train_loader),
-                        train_loss,
-                        train_perplexity,
-                        valid_loss,
-                        valid_perplexity,
+                    (
+                        f"Epoch: {epoch + 1}, Steps: {len(self.train_loader)} | ",
+                        f"Train Loss: {train_loss:.4f}, Train Perp: {train_perplexity:.4f} | ",
+                        f"Valid Loss: {valid_loss:.4f}, Valid Perp: {valid_perplexity:.4f}",
                     )
                 )
 
@@ -105,6 +110,8 @@ class Exp:
         valid_loss, valid_perplexity = self.method.valid_one_epoch(self.valid_loader)
 
         print_log("Valid Perp: {0:.4f}".format(valid_perplexity))
+        if args.wandb_project:
+            wandb.log({"Val/Loss": valid_loss, "Val/Perplexity": valid_perplexity})
 
         return valid_loss, valid_perplexity
 
@@ -119,13 +126,33 @@ class Exp:
                 test_perplexity, test_recovery
             )
         )
-
-        for cat in test_subcat_recovery.keys():
-            print_log(
-                "Category {0} Rec: {1:.4f}\n".format(cat, test_subcat_recovery[cat])
+        if args.wandb_project:
+            extra_cats = {
+                f"Test/{cat}/Perplexity": val
+                for cat, val in test_subcat_recovery.items()
+            }
+            wandb.log(
+                {
+                    "Test/Perplexity": test_perplexity,
+                    "Test/Recovery": test_recovery,
+                    **extra_cats,
+                }
             )
 
+        for cat, val in test_subcat_recovery.items():
+            print_log("Category {0} Rec: {1:.4f}\n".format(cat, val))
+
         return test_perplexity, test_recovery
+
+    def init_logger(self, config: dict) -> None:
+        if args.wandb_project:
+            wandb.init(project=args.wandb_project, config=config)
+
+    def end_logger(self, test_perp: float, test_rec: float) -> None:
+        if args.wandb_project:
+            wandb.summary["test_perplexity"] = test_perp
+            wandb.summary["test_recovery"] = test_rec
+            wandb.finish()
 
 
 if __name__ == "__main__":
@@ -134,9 +161,16 @@ if __name__ == "__main__":
     args = create_parser()
     config = args.__dict__
 
+    if args.wandb_project:
+        try:
+            import wandb
+        except ImportError as e:
+            logger.error(f"Could not import wandb: {e}. Consider `pip install wandb`")
+
     print(config)
 
     exp = Exp(args)
+    exp.init_logger(config)
 
     # svpath = '/gaozhangyang/experiments/ProDesign/results/ProDesign/'
     # exp.method.model.load_state_dict(torch.load(svpath+'checkpoint.pth'))
@@ -146,3 +180,4 @@ if __name__ == "__main__":
 
     print(">>>>>>>>>>>>>>>>>>>>>>>>>> testing  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
     test_perp, test_rec = exp.test()
+    exp.end_logger()
