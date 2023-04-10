@@ -1,0 +1,175 @@
+absl-py==1.4.0
+aiofiles==22.1.0
+aiohttp==3.8.4
+aiosignal==1.3.1
+aiosqlite==0.18.0
+antlr4-python3-runtime==4.9.3
+anyio==3.6.2
+argon2-cffi==21.3.0
+argon2-cffi-bindings==21.2.0
+arrow==1.2.3
+asttokens==2.2.1
+async-timeout==4.0.2
+attrs==22.2.0
+Babel==2.12.1
+backcall==0.2.0
+beautifulsoup4==4.12.0
+bleach==6.0.0
+blessed==1.20.0
+brotlipy==0.7.0
+certifi @ file:///croot/certifi_1671487769961/work/certifi
+cffi @ file:///tmp/abs_98z5h56wf8/croots/recipe/cffi_1659598650955/work
+chardet==5.1.0
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+click==8.1.3
+colorama==0.4.6
+comm==0.1.3
+cryptography @ file:///croot/cryptography_1677533068310/work
+DataProperty==0.55.0
+datasets==2.11.0
+debugpy==1.6.6
+decorator==5.1.1
+defusedxml==0.7.1
+dill==0.3.6
+executing==1.2.0
+fastjsonschema==2.16.3
+filelock @ file:///croot/filelock_1672387128942/work
+flit_core @ file:///croot/flit-core_1679397103445/work/source/flit_core
+fqdn==1.5.1
+frozenlist==1.3.3
+fsspec==2023.4.0
+gmpy2 @ file:///tmp/build/80754af9/gmpy2_1645455533097/work
+huggingface-hub==0.13.3
+idna @ file:///croot/idna_1666125576474/work
+inquirer==3.1.3
+ipykernel==6.22.0
+ipython==8.12.0
+ipython-genutils==0.2.0
+isoduration==20.11.0
+jedi==0.18.2
+Jinja2 @ file:///croot/jinja2_1666908132255/work
+joblib==1.2.0
+json5==0.9.11
+jsonlines==3.1.0
+jsonpointer==2.3
+jsonschema==4.17.3
+jupyter-events==0.6.3
+jupyter-ydoc==0.2.3
+jupyter_client==8.1.0
+jupyter_core==5.3.0
+jupyter_server==2.5.0
+jupyter_server_fileid==0.8.0
+jupyter_server_terminals==0.4.4
+jupyter_server_ydoc==0.8.0
+jupyterlab==3.6.3
+jupyterlab-pygments==0.2.2
+jupyterlab_server==2.22.0
+lm-eval==0.3.0
+MarkupSafe @ file:///opt/conda/conda-bld/markupsafe_1654597864307/work
+matplotlib-inline==0.1.6
+mbstrdecoder==1.1.2
+mistune==2.0.5
+mkl-fft==1.3.1
+mkl-random @ file:///home/builder/ci_310/mkl_random_1641843545607/work
+mkl-service==2.4.0
+mpmath==1.2.1
+multidict==6.0.4
+multiprocess==0.70.14
+nbclassic==0.5.4
+nbclient==0.7.3
+nbconvert==7.3.0
+nbformat==5.8.0
+nest-asyncio==1.5.6
+networkx @ file:///croot/networkx_1678964333703/work
+ninja==1.11.1
+nltk==3.8.1
+notebook==6.5.3
+notebook_shim==0.2.2
+numexpr==2.8.4
+numpy @ file:///croot/numpy_and_numpy_base_1672336185480/work
+omegaconf==2.3.0
+openai==0.27.4
+packaging==23.0
+pandas==2.0.0
+pandocfilters==1.5.0
+parso==0.8.3
+pathvalidate==2.5.2
+pexpect==4.8.0
+pickleshare==0.7.5
+Pillow==9.4.0
+platformdirs==3.2.0
+portalocker==2.7.0
+prometheus-client==0.16.0
+prompt-toolkit==3.0.38
+psutil==5.9.4
+ptyprocess==0.7.0
+pure-eval==0.2.2
+pyarrow==11.0.0
+pybind11==2.10.4
+pycountry==22.3.5
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyg-lib==0.2.0+pt20cu118
+Pygments==2.14.0
+pyOpenSSL @ file:///croot/pyopenssl_1677607685877/work
+pyrsistent==0.19.3
+PySocks @ file:///home/builder/ci_310/pysocks_1640793678128/work
+pytablewriter==0.64.2
+python-dateutil==2.8.2
+python-editor==1.0.4
+python-json-logger==2.0.7
+pytz==2023.3
+PyYAML==6.0
+pyzmq==25.0.2
+readchar==4.0.5
+regex==2023.3.23
+requests @ file:///croot/requests_1678709721434/work
+responses==0.18.0
+rfc3339-validator==0.1.4
+rfc3986-validator==0.1.1
+rouge-score==0.1.2
+rwkv==0.7.2
+-e git+https://github.com/harrisonvanderbyl/rwkvstic@540480d232f6d35a38635edefd686abe5d798564#egg=rwkvstic
+sacrebleu==1.5.0
+scikit-learn==1.2.2
+scipy==1.10.1
+Send2Trash==1.8.0
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+sniffio==1.3.0
+soupsieve==2.4
+sqlitedict==2.1.0
+stack-data==0.6.2
+sympy @ file:///croot/sympy_1668202399572/work
+tabledata==1.3.1
+tcolorpy==0.1.2
+terminado==0.17.1
+threadpoolctl==3.1.0
+tinycss2==1.2.1
+tokenizers==0.13.2
+tomli==2.0.1
+torch==2.0.0
+torch-cluster==1.6.1+pt20cu118
+torch-scatter==2.1.1+pt20cu118
+torch-sparse==0.6.17+pt20cu118
+torch-spline-conv==1.2.2+pt20cu118
+torchaudio==2.0.0
+torchvision==0.15.0
+tornado==6.2
+tqdm==4.65.0
+tqdm-multiprocess==0.0.11
+traitlets==5.9.0
+transformers==4.27.4
+triton==2.0.0
+typepy==1.3.0
+typing_extensions @ file:///croot/typing_extensions_1669924550328/work
+tzdata==2023.3
+uri-template==1.2.0
+urllib3 @ file:///croot/urllib3_1680254681959/work
+wcwidth==0.2.6
+webcolors==1.13
+webencodings==0.5.1
+websocket-client==1.5.1
+xxhash==3.2.0
+y-py==0.5.9
+yarl==1.8.2
+ypy-websocket==0.8.2
+zstandard==0.20.0
