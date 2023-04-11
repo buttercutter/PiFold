@@ -16,6 +16,10 @@ class ProDesign(Base_method):
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer, self.scheduler = self._init_optimizer(steps_per_epoch)
 
+        # if self.args.compile:
+        torch._dynamo.config.suppress_errors = True
+        self.model = torch.compile(self.model)
+
     def _build_model(self):
         return ProDesign_Model(self.args).to(self.device)
 
