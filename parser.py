@@ -47,7 +47,7 @@ def create_parser():
         "--checkpoint",
         default=0,
         type=int,
-        help="Per encoder layer checkpointing to reduce mem usage",
+        help="0: No ckpt, 1: per-layer ckpt 10gbs vram -> 4gbs. 20% slower training",
     )
 
     # Training parameters
