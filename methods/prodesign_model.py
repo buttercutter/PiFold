@@ -78,7 +78,9 @@ class ProDesign_Model(nn.Module):
         # FIXME: hypnopump@ not used ???
         self.W_f = Linear(edge_features, hidden_dim, bias=True)
 
-        self.encoder = StructureEncoder(hidden_dim, num_encoder_layers, dropout)
+        self.encoder = StructureEncoder(
+            hidden_dim, num_encoder_layers, dropout, checkpoint=args.checkpoint
+        )
 
         self.decoder = MLPDecoder(hidden_dim)
         self._init_params()
