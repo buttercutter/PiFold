@@ -4,6 +4,7 @@ import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils import checkpoint
 from torch_scatter import scatter_mean, scatter_softmax, scatter_sum
 
 from utils import gather_nodes
@@ -262,20 +263,21 @@ class GeneralGNN(nn.Module):
 class StructureEncoder(nn.Module):
     def __init__(
         self,
-        hidden_dim,
-        num_encoder_layers=3,
-        dropout=0,
-        node_net="AttMLP",
-        edge_net="EdgeMLP",
-        node_context=True,
-        edge_context=False,
+        hidden_dim: int,
+        num_encoder_layers: int = 3,
+        dropout: float = 0,
+        node_net: str = "AttMLP",
+        edge_net: str = "EdgeMLP",
+        node_context: bool = True,
+        edge_context: bool = False,
+        checkpoint: bool = False,
     ):
         """Graph labeling network"""
         super(StructureEncoder, self).__init__()
+        self.checkpoint = checkpoint
+
         encoder_layers = []
-
         module = GeneralGNN
-
         for i in range(num_encoder_layers):
             encoder_layers.append(
                 module(
@@ -293,7 +295,10 @@ class StructureEncoder(nn.Module):
 
     def forward(self, h_V, h_P, P_idx, batch_id):
         for layer in self.encoder_layers:
-            h_V, h_P = layer(h_V, h_P, P_idx, batch_id)
+            if self.checkpoint:
+                h_V, h_P = checkpoint.checkpoint(layer, h_V, h_P, P_idx, batch_id)
+            else:
+                h_V, h_P = layer(h_V, h_P, P_idx, batch_id)
         return h_V, h_P
 
 
