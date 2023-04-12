@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -39,7 +41,8 @@ class ProDesign(Base_method):
                 mask_fw,
                 decoding_order,
             ) = self.model._get_features(S, score, X=X, mask=mask)
-            log_probs = self.model(h_V, h_E, E_idx, batch_id)
+            num_iters = random.randint(1, self.args.max_num_iters)
+            log_probs = self.model(h_V, h_E, E_idx, batch_id, num_iters=num_iters)
             loss = self.criterion(log_probs, S)
             loss.backward()
             # TODO: hypnopump@ consider clipping gradients on a per-sample basis instead of per-batch. How ??? idk yet
@@ -67,7 +70,7 @@ class ProDesign(Base_method):
     def valid_one_epoch(self, valid_loader):
         self.model.eval()
         valid_sum, valid_weights = 0, 1e-7
-
+        num_iters = self.args.max_num_iters
         valid_pbar = tqdm(valid_loader)
         with torch.no_grad():
             for step_idx, batch in enumerate(valid_pbar):
@@ -84,7 +87,7 @@ class ProDesign(Base_method):
                     mask_fw,
                     decoding_order,
                 ) = self.model._get_features(S, score, X=X, mask=mask)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                log_probs = self.model(h_V, h_E, E_idx, batch_id, num_iters=num_iters)
                 loss = self.criterion(log_probs, S)
 
                 if isinstance(valid_sum, int):
@@ -108,8 +111,8 @@ class ProDesign(Base_method):
     def test_one_epoch(self, test_loader):
         self.model.eval()
         test_sum, test_weights = 0, 1e-7
+        num_iters = self.args.max_num_iters
         test_pbar = tqdm(test_loader)
-
         with torch.no_grad():
             for step_idx, batch in enumerate(test_pbar):
                 X, S, score, mask, lengths = cuda(batch, device=self.device)
@@ -125,7 +128,7 @@ class ProDesign(Base_method):
                     mask_fw,
                     decoding_order,
                 ) = self.model._get_features(S, score, X=X, mask=mask)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                log_probs = self.model(h_V, h_E, E_idx, batch_id, num_iters=num_iters)
                 loss, loss_av = self.loss_nll_flatten(S, log_probs)
                 # TODO: hypnopump@ wtf ???
                 mask = torch.ones_like(loss)

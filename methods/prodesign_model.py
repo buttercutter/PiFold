@@ -2,6 +2,7 @@ import time
 
 import torch
 import torch.nn as nn
+from torch_geometric.nn.norm.layer_norm import LayerNorm as sparseLayerNorm
 
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
@@ -22,6 +23,11 @@ class ProDesign_Model(nn.Module):
         self.top_k = args.k_neighbors
         self.num_rbf = 16
         self.num_positional_embeddings = 16
+        self.norm_class = (
+            nn.BatchNorm1d
+            if args.norm == "batchnorm"
+            else (sparseLayerNorm if args.norm == "layernorm" else nn.Identity)
+        )
 
         # prior_matrix = [
         #     [-0.58273431, 0.56802827, -0.54067466],
@@ -60,17 +66,17 @@ class ProDesign_Model(nn.Module):
 
         self.node_embedding = Linear(node_in, node_features, bias=True)
         self.edge_embedding = Linear(edge_in, edge_features, bias=True)
-        self.norm_nodes = nn.BatchNorm1d(node_features)
-        self.norm_edges = nn.BatchNorm1d(edge_features)
+        self.norm_nodes = self.norm_class(node_features, affine=False)
+        self.norm_edges = self.norm_class(edge_features, affine=False)
 
         # TODO: hypnopump@ consider LayerNorm (if dense) or OnlineNorm ???
         self.W_v = nn.Sequential(
             Linear(node_features, hidden_dim, bias=True, init="relu"),
             nn.GELU(),
-            nn.BatchNorm1d(hidden_dim),
+            self.norm_class(hidden_dim, affine=False),
             Linear(hidden_dim, hidden_dim, bias=True, init="relu"),
             nn.GELU(),
-            nn.BatchNorm1d(hidden_dim),
+            self.norm_class(hidden_dim, affine=False),
             Linear(hidden_dim, hidden_dim, bias=True),
         )
 
@@ -79,14 +85,31 @@ class ProDesign_Model(nn.Module):
         self.W_f = Linear(edge_features, hidden_dim, bias=True)
 
         self.encoder = StructureEncoder(
-            hidden_dim, num_encoder_layers, dropout, checkpoint=args.checkpoint
+            hidden_dim,
+            num_encoder_layers,
+            dropout,
+            checkpoint=args.checkpoint,
+            norm_class=self.norm_class,
         )
 
-        self.decoder = MLPDecoder(hidden_dim)
+        self.decoder = MLPDecoder(hidden_dim, norm_class=self.norm_class)
         self._init_params()
 
         self.encode_t = 0
         self.decode_t = 0
+
+        if self.args.max_num_iters > 1:
+            self.recycle_V = self.norm_class(hidden_dim)
+            self.recycle_E = self.norm_class(hidden_dim)
+            self.recycle_P = nn.Sequential(
+                nn.Softmax(),
+                self.norm_class(self.decoder.vocab, affine=False),
+                Linear(self.decoder.vocab, hidden_dim, bias=True),
+            )
+
+    def recycling(self, h_V, h_P, logits):
+        """Recycles last dim's node (+ probs), edge and probs embedding."""
+        return self.recycle_V(h_V) + self.recycle_P(logits), self.recycle_E(h_P)
 
     def forward(
         self,
@@ -100,20 +123,30 @@ class ProDesign_Model(nn.Module):
         mask_fw=None,
         decoding_order=None,
         return_logit=False,
+        num_iters: int = 1,
     ):
         t1 = time.time()
         h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V)))
         h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P)))
 
-        h_V, h_P = self.encoder(h_V, h_P, P_idx, batch_id)
-        t2 = time.time()
+        is_grad_enabled = torch.is_grad_enabled()
+        for i in range(num_iters):
+            # only enable gradient for the last cycle
+            with th.set_grad_enabled(i == num_iters - 1 and is_grad_enabled):
+                if i != 0:
+                    h_V_prev, h_P_prev = self.recycling(h_V, h_P, logits)
+                    h_V = h_V_prev + h_V
+                    h_P = h_P_prev + h_P
 
-        log_probs, logits = self.decoder(h_V, batch_id)
+                h_V, h_P = self.encoder(h_V, h_P, P_idx, batch_id)
+                t2 = time.time()
 
-        t3 = time.time()
+                log_probs, logits = self.decoder(h_V, batch_id)
 
-        self.encode_t += t2 - t1
-        self.decode_t += t3 - t2
+                t3 = time.time()
+
+            self.encode_t += t2 - t1
+            self.decode_t += t3 - t2
 
         if return_logit == True:
             return log_probs, logits

@@ -49,6 +49,15 @@ def create_parser():
         type=int,
         help="Per encoder layer checkpointing to reduce mem usage",
     )
+    parser.add_argument(
+        "--max_num_iters", default=1, type=int, help="recycling (1,max_num_iters)"
+    )
+    parser.add_argument(
+        "--norm",
+        default="batchnorm",
+        type=str,
+        choices=["batchnorm", "layernorm", "none"],
+    )
 
     # Training parameters
     parser.add_argument("--epoch", default=100, type=int, help="end epoch")

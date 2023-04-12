@@ -98,13 +98,21 @@ class NeighborAttention(nn.Module):
 
 #################################### edge modules ###############################
 class EdgeMLP(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
+    def __init__(
+        self,
+        num_hidden,
+        num_in,
+        dropout=0.1,
+        num_heads=None,
+        scale=30,
+        norm_class: nn.Module = nn.BatchNorm1d,
+    ):
         super(EdgeMLP, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
         self.dropout = nn.Dropout(dropout)
-        self.norm = nn.BatchNorm1d(num_hidden)
+        self.norm = norm_class(num_hidden)
         # TODO: hypnopump@: if not loading published models, turn into MLP ???
         self.W11 = Linear(num_hidden + num_in, num_hidden, bias=True, init="relu")
         self.W12 = Linear(num_hidden, num_hidden, bias=True, init="relu")
@@ -195,13 +203,15 @@ class GeneralGNN(nn.Module):
         edge_net="EdgeMLP",
         node_context=0,
         edge_context=0,
+        norm_class: nn.Module = nn.BatchNorm1d,
     ):
         super(GeneralGNN, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
+        self.norm_class = norm_class
         self.dropout = nn.Dropout(dropout)
-        self.norm = nn.ModuleList([nn.BatchNorm1d(num_hidden) for _ in range(3)])
+        self.norm = nn.ModuleList([self.norm_class(num_hidden) for _ in range(3)])
         self.node_net = node_net
         self.edge_net = edge_net
         if node_net == "AttMLP":
@@ -209,7 +219,9 @@ class GeneralGNN(nn.Module):
         if edge_net == "None":
             pass
         if edge_net == "EdgeMLP":
-            self.edge_update = EdgeMLP(num_hidden, num_in, num_heads=4)
+            self.edge_update = EdgeMLP(
+                num_hidden, num_in, num_heads=4, norm_class=norm_class
+            )
 
         self.context = Context(
             num_hidden,
@@ -240,7 +252,7 @@ class GeneralGNN(nn.Module):
         * batch_id: (N), node batch ids
         """
         src_idx, dst_idx = edge_idx
-
+        # TODO: hypnopump@ consider pre-norm blocks instead of post-norm
         if self.node_net == "AttMLP" or self.node_net == "QKV":
             dh = self.attention(
                 h_V, torch.cat([h_E, h_V[dst_idx]], dim=-1), src_idx, batch_id, dst_idx
@@ -271,6 +283,7 @@ class StructureEncoder(nn.Module):
         node_context: bool = True,
         edge_context: bool = False,
         checkpoint: bool = False,
+        norm_class: nn.Module = nn.BatchNorm1d,
     ):
         """Graph labeling network"""
         super(StructureEncoder, self).__init__()
@@ -288,6 +301,7 @@ class StructureEncoder(nn.Module):
                     edge_net=edge_net,
                     node_context=node_context,
                     edge_context=edge_context,
+                    norm_class=norm_class,
                 ),
             )
 
@@ -303,8 +317,12 @@ class StructureEncoder(nn.Module):
 
 
 class MLPDecoder(nn.Module):
-    def __init__(self, hidden_dim, vocab=20):
+    def __init__(
+        self, hidden_dim: int, vocab: int = 20, norm_class: nn.Module = nn.BatchNorm1d
+    ):
         super().__init__()
+        self.vocab = vocab
+        # TODO: hypnopump@ consider potential bottleneck here: norm+mlp?
         self.readout = Linear(hidden_dim, vocab, init="final")
 
     def forward(self, h_V, batch_id=None):
