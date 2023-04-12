@@ -128,8 +128,7 @@ class Exp:
         )
         if args.wandb_project:
             extra_cats = {
-                f"Test/{cat}/Perplexity": val
-                for cat, val in test_subcat_recovery.items()
+                f"Test/{cat}/Recovery": val for cat, val in test_subcat_recovery.items()
             }
             wandb.log(
                 {

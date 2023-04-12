@@ -225,21 +225,6 @@ class ProDesign_Model(nn.Module):
 
         # distance
         atom_N, atom_Ca, atom_C, atom_O = X.unbind(dim=-2)[:4]
-        b = atom_Ca - atom_N
-        c = atom_C - atom_Ca
-        a = torch.cross(b, c, dim=-1)
-
-        if self.args.virtual_num > 0:
-            virtual_atoms = self.virtual_atoms / torch.norm(
-                self.virtual_atoms, dim=1, keepdim=True
-            )
-            for i in range(self.virtual_atoms.shape[0]):
-                vars()["atom_v" + str(i)] = (
-                    virtual_atoms[i][0] * a
-                    + virtual_atoms[i][1] * b
-                    + virtual_atoms[i][2] * c
-                    + 1 * atom_Ca
-                )
 
         node_list = ["Ca-N", "Ca-C", "Ca-O", "N-C", "N-O", "O-C"]
         node_dist = []
@@ -257,6 +242,22 @@ class ProDesign_Model(nn.Module):
             )
 
         if self.args.virtual_num > 0:
+            b = atom_Ca - atom_N
+            c = atom_C - atom_Ca
+            a = torch.cross(b, c, dim=-1)
+            frame_rot = torch.stack((a, b, c), dim=-2)
+            frame_t = atom_Ca
+            # (N, d)
+            virtual_atoms = F.normalize(self.virtual_atoms, dim=1)
+            atom_vs = virtual_atoms @ frame_rot + frame_t
+            for i in range(self.virtual_atoms.shape[0]):
+                vars()["atom_v" + str(i)] = (
+                    virtual_atoms[i][0] * a
+                    + virtual_atoms[i][1] * b
+                    + virtual_atoms[i][2] * c
+                    + 1 * atom_Ca
+                )
+
             for i in range(self.virtual_atoms.shape[0]):
                 # # true atoms
                 for j in range(0, i):
