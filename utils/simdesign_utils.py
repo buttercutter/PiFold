@@ -3,6 +3,18 @@ import torch.nn.functional as F
 import numpy as np
 from collections.abc import Mapping, Sequence
 
+"""
+Notation:
+    - B: Batch size
+    - N: Number of nodes
+    - E: Number of edges
+    - K: K-nearest neighbors
+    - C: Chain atoms per residue
+    - R: Rotation basis vectors
+    - D: Dimensions
+"""
+
+
 # Thanks for StructTrans
 # https://github.com/jingraham/neurips19-graph-protein-design
 def nan_to_num(tensor, nan=0.0):
@@ -102,7 +114,14 @@ def _get_rbf(A, B, E_idx=None, num_rbf=16):
         RBF_A_B = _rbf(D_A_B, num_rbf)
     return RBF_A_B
 
-def _orientations_coarse_gl(X, E_idx, eps=1e-6):
+def _orientations_coarse_gl(X: torch.Tensor, E_idx: torch.Tensor, eps=1e-6) -> torch.Tensor:
+    """ Compute coarse-grained orientations of the backbone.
+    Inputs:
+    * X: (B, L, C, 3) protein coordinates?
+    * E_idx: (B, L, K) neighbor indices
+    Outputs:
+    * O: (B, L, 7) coarse-grained orientations
+    """
     X = X[:,:,:3,:].reshape(X.shape[0], 3*X.shape[1], 3) 
     dX = X[:,1:,:] - X[:,:-1,:] # CA-N, C-CA, N-C, CA-N...
     U = _normalize(dX, dim=-1)
@@ -115,14 +134,16 @@ def _orientations_coarse_gl(X, E_idx, eps=1e-6):
     X = X[:,::3,:]
 
     O = torch.stack((b_1, n_0, torch.cross(b_1, n_0)), 2)
-    O = O.view(list(O.shape[:2]) + [9])
+    O = O.view(*O.shape[:2], 9)
+    # TODO: hypnopump@ why pad?
     O = F.pad(O, (0,0,0,1), 'constant', 0) # [16, 464, 9]
 
-    O_neighbors = gather_nodes(O, E_idx) # [16, 464, 30, 9]
-    X_neighbors = gather_nodes(X, E_idx) # [16, 464, 30, 3]
+    O_neighbors = gather_nodes(O, E_idx) # [b, n, rd]
+    X_neighbors = gather_nodes(X, E_idx) # [b, n, k, d]
 
-    O = O.view(list(O.shape[:2]) + [3,3]).unsqueeze(2) # [16, 464, 1, 3, 3]
-    O_neighbors = O_neighbors.view(list(O_neighbors.shape[:3]) + [3,3]) # [16, 464, 30, 3, 3]
+    # FIXME: hypnopump@ remove pattern once gather_nodes accepts dim
+    O = O.view(*O.shape[:2], 1, 3, 3) # [b, n, 1, r, d]
+    O_neighbors = O_neighbors.view(*O_neighbors.shape[:3],3,3) # [b, n, k, r, d]
 
     dX = X_neighbors - X.unsqueeze(-2) # [16, 464, 30, 3]
     dU = torch.matmul(O, dX.unsqueeze(-1)).squeeze(-1) # [16, 464, 30, 3] 邻居的相对坐标
@@ -132,8 +153,19 @@ def _orientations_coarse_gl(X, E_idx, eps=1e-6):
 
 
 def _orientations_coarse_gl_tuple(X, E_idx, eps=1e-6):
+    """
+    Inputs:
+    * X: [B, N, 3, 3]
+    * E_idx: [B, N, K]
+    Outputs:
+    * V_direct: [B, N, 3, 3] NCO relpos in CA frame
+    * E_direct: [B, N, K, ???]
+    * q: [???, 4] quaternion
+    """
     V = X.clone()
-    X = X[:,:,:3,:].reshape(X.shape[0], 3*X.shape[1], 3) 
+    X = X[:,:,:3,:].reshape(X.shape[0], 3*X.shape[1], 3)
+    # TODO: hypnopump@ compute frames only once per protein
+    # FIXME: hypnopump@ unpack and compute frames properly, this is ilegible lol
     dX = X[:,1:,:] - X[:,:-1,:] # CA-N, C-CA, N-C, CA-N...
     U = _normalize(dX, dim=-1)
     u_0, u_1 = U[:,:-2,:], U[:,1:-1,:]
@@ -145,19 +177,18 @@ def _orientations_coarse_gl_tuple(X, E_idx, eps=1e-6):
     X = X[:,::3,:]
     Q = torch.stack((b_1, n_0, torch.cross(b_1, n_0)), 2)
     Q = Q.view(list(Q.shape[:2]) + [9])
-    Q = F.pad(Q, (0,0,0,1), 'constant', 0) # [16, 464, 9]
+    Q = F.pad(Q, (0,0,0,1), 'constant', 0) # (b, n, 3*3)
 
-    Q_neighbors = gather_nodes(Q, E_idx) # [16, 464, 30, 9]
-    X_neighbors = gather_nodes(V[:,:,1,:], E_idx) # [16, 464, 30, 3]
-    N_neighbors = gather_nodes(V[:,:,0,:], E_idx)
-    C_neighbors = gather_nodes(V[:,:,2,:], E_idx)
-    O_neighbors = gather_nodes(V[:,:,3,:], E_idx)
+    # FIXME: hypnopump@ in batched model
+    Q_neighbors = gather_nodes(Q, E_idx) # (b, n, k, 3*3)
+    XNCO_neighbors = map(partial(gather_nodes, neighbor_idx=E_idx), X.unbind(dim=-2))
 
-    Q = Q.view(list(Q.shape[:2]) + [3,3]).unsqueeze(2) # [16, 464, 1, 3, 3]
-    Q_neighbors = Q_neighbors.view(list(Q_neighbors.shape[:3]) + [3,3]) # [16, 464, 30, 3, 3]
+    Q = Q.view(*Q.shape[:2], 1, 3, 3) # (b, n, 1, 3, 3)
+    Q_neighbors = Q_neighbors.view(*Q_neighbors.shape[:3], 3, 3) # (b, n, k, 3, 3)
 
-    dX = torch.stack([X_neighbors,N_neighbors,C_neighbors,O_neighbors], dim=3) - X[:,:,None,None,:] # [16, 464, 30, 3]
-    dU = torch.matmul(Q[:,:,:,None,:,:], dX[...,None]).squeeze(-1) # [16, 464, 30, 3] 邻居的相对坐标
+    # FIXME: hypnopump@ embedding relative orientations, but clarify better
+    dX = torch.stack(list(XNCO_neighbors), dim=-2) - X[:,:,None,None,:] # (b, n, k, c, d)
+    dU = torch.matmul(Q[:,:,:,None,:,:], dX[...,None]).squeeze(-1) # (b, n, k, c, d?) relative coords of neighbors
     B, N, K = dU.shape[:3]
     E_direct = _normalize(dU, dim=-1)
     E_direct = E_direct.reshape(B, N, K,-1)
@@ -165,53 +196,51 @@ def _orientations_coarse_gl_tuple(X, E_idx, eps=1e-6):
     q = _quaternions(R)
     # edge_feat = torch.cat((dU, q), dim=-1) # 相对方向向量+旋转四元数
     
+    # NCO relpos in frame
     dX_inner = V[:,:,[0,2,3],:] - X.unsqueeze(-2)
     dU_inner = torch.matmul(Q, dX_inner.unsqueeze(-1)).squeeze(-1)
     dU_inner = _normalize(dU_inner, dim=-1)
     V_direct = dU_inner.reshape(B,N,-1)
     return V_direct, E_direct, q
 
-def gather_edges(edges, neighbor_idx):
+def gather_edges(edges: torch.Tensor, neighbor_idx: torch.Tensor) -> torch.Tensor:
+    """ Inputs:
+    * edges: ???
+    * neighbor_idx: ???
+    """
     neighbors = neighbor_idx.unsqueeze(-1).expand(-1, -1, -1, edges.size(-1))
     return torch.gather(edges, 2, neighbors)
 
-def gather_nodes(nodes, neighbor_idx):
-    neighbors_flat = neighbor_idx.view((neighbor_idx.shape[0], -1)) # [4, 317, 30]-->[4, 9510]
-    neighbors_flat = neighbors_flat.unsqueeze(-1).expand(-1, -1, nodes.size(2)) # [4, 9510, dim]
-    neighbor_features = torch.gather(nodes, 1, neighbors_flat) # [4, 9510, dim]
-    return neighbor_features.view(list(neighbor_idx.shape)[:3] + [-1]) # [4, 317, 30, 128]
+# TODO: hypnopump@ accept dimension for gathering
+# TODO: hypnopump@ pack dims before and after, index, unpack
+def gather_nodes(nodes: torch.Tensor, neighbor_idx: torch.Tensor) -> torch.Tensor:
+    """ Inputs:
+    * nodes: [B, N, D]
+    * neighbor_idx: [B, N, K] or [B, N, ]
+    """
+    b, n, d = nodes.shape
+    _, _, k = neighbor_idx.shape
+
+    neighbors_flat = neighbor_idx.view(b, -1)  # (b, (n k))
+    neighbors_flat = neighbors_flat.unsqueeze(-1).expand(-1, -1, d)  # (b, (n k), d)
+    neighbor_features = torch.gather(nodes, 1, neighbors_flat)  # (b, (n k), d)
+    return neighbor_features.view(b, n, k, -1) # (b, n, k, d)
 
 
-def _quaternions(R):
-    diag = torch.diagonal(R, dim1=-2, dim2=-1)
-    Rxx, Ryy, Rzz = diag.unbind(-1)
-    magnitudes = 0.5 * torch.sqrt(torch.abs(1 + torch.stack([
-            Rxx - Ryy - Rzz, 
-        - Rxx + Ryy - Rzz, 
-        - Rxx - Ryy + Rzz
-    ], -1)))
-    _R = lambda i,j: R[:,:,:,i,j]
-    signs = torch.sign(torch.stack([
-        _R(2,1) - _R(1,2),
-        _R(0,2) - _R(2,0),
-        _R(1,0) - _R(0,1)
-    ], -1))
+def _quaternions(R: torch.Tensor) -> torch.Tensor:
+    """ ((...), 3, 3) -> ((...), 4) """
+    ii, ij, ik, ji, jj, jk, ki, kj, kk = torch.unbind(R.reshape(*R.shape[:2], -1), -1)
+    proto_q = torch.stack(
+        [
+            + ii - jj - kk,
+            - ii + jj - kk,
+            - ii - jj + kk
+        ], dim=-1
+    )
+    magnitudes = 0.5 * proto_q.add_(1.).abs().sqrt()
+
+    signs = torch.stack([kj - jk, ik - ki, ji - ij], -1).sign()
     xyz = signs * magnitudes
-    w = torch.sqrt(F.relu(1 + diag.sum(-1, keepdim=True))) / 2.
+    w = F.relu(1 + diag.sum(-1, keepdim=True)).sqrt() / 2.
     Q = torch.cat((xyz, w), -1)
     return _normalize(Q, dim=-1)
-
-def cuda(obj, *args, **kwargs):
-    """
-    Transfer any nested container of tensors to CUDA.
-    """
-    if hasattr(obj, "cuda"):
-        return obj.cuda(*args, **kwargs)
-    elif isinstance(obj, Mapping):
-        return type(obj)({k: cuda(v, *args, **kwargs) for k, v in obj.items()})
-    elif isinstance(obj, Sequence):
-        return type(obj)(cuda(x, *args, **kwargs) for x in obj)
-    elif isinstance(obj, np.ndarray):
-        return torch.tensor(obj, *args, **kwargs)
-
-    raise TypeError("Can't transfer object type `%s`" % type(obj))

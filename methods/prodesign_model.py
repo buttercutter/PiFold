@@ -115,7 +115,7 @@ class ProDesign_Model(nn.Module):
         D_neighbors, E_idx = torch.topk(D_adjust, min(top_k, D_adjust.shape[-1]), dim=-1, largest=False)
         return D_neighbors, E_idx  
 
-    def _get_features(self, S, score, X, mask):
+    def _get_features(self, S: torch.Tensor, score: torch.Tensor, X: torch.Tensor, mask: torch.Tensor):
         device = X.device
         mask_bool = (mask==1)
         B, N, _,_ = X.shape
