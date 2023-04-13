@@ -22,7 +22,7 @@ def load_data(
         valid_set.change_mode("valid")
         test_set.change_mode("test")
         if data_name == "TS":
-            test_set = TS(osp.join(data_root, "ts"))
+            test_set = TS(os.path.join(data_root, "ts"))
         collate_fn = featurize_GTrans
 
     default_loader = partial(

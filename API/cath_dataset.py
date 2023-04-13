@@ -38,9 +38,6 @@ class CATH(data.Dataset):
                 entry = json.loads(line)
                 seq = entry["seq"]
 
-                for key, val in entry["coords"].items():
-                    entry["coords"][key] = np.asarray(val)
-
                 bad_chars = set(seq).difference(alphabet_set)
 
                 # only keep prots w/ standard residues
@@ -51,10 +48,9 @@ class CATH(data.Dataset):
                             {
                                 "title": entry["name"],
                                 "seq": entry["seq"],
-                                "CA": entry["coords"]["CA"],
-                                "C": entry["coords"]["C"],
-                                "O": entry["coords"]["O"],
-                                "N": entry["coords"]["N"],
+                                **{
+                                    k: np.asarray(v) for k, v in entry["coords"].items()
+                                },
                             }
                         )
 
