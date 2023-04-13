@@ -10,3 +10,5 @@ __pycache__
 /tmp
 .vscode
 .ipynb_checkpoints
+/wandb/*
+wandb/*
