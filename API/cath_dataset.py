@@ -8,6 +8,7 @@ import numpy as np
 import torch.utils.data as data
 from tqdm import tqdm
 
+from .featuizer import ALPHABET
 from .utils import cached_property
 
 
@@ -26,8 +27,7 @@ class CATH(data.Dataset):
 
     @cached_property
     def cache_data(self):
-        alphabet = "ACDEFGHIKLMNPQRSTVWY"
-        alphabet_set = set([a for a in alphabet])
+        alphabet_set = set(ALPHABET)
         if not os.path.exists(self.path):
             raise "no such file:{} !!!".format(self.path)
         else:
@@ -41,8 +41,10 @@ class CATH(data.Dataset):
                 for key, val in entry["coords"].items():
                     entry["coords"][key] = np.asarray(val)
 
-                bad_chars = set([s for s in seq]).difference(alphabet_set)
+                bad_chars = set(seq).difference(alphabet_set)
 
+                # only keep prots w/ standard residues
+                # TODO: hypnopump@ think about masking out at loss compute and use these datapoints
                 if len(bad_chars) == 0:
                     if len(entry["seq"]) <= self.max_length:
                         data_list.append(
