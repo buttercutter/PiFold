@@ -8,7 +8,7 @@ import numpy as np
 import torch.utils.data as data
 from tqdm import tqdm
 
-from .featuizer import ALPHABET
+from .featurizer import ALPHABET
 from .utils import cached_property
 
 

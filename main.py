@@ -111,7 +111,7 @@ class Exp:
                         "Test/Perplexity": test_perplexity,
                         "Test/Recovery": test_recovery,
                         **{
-                            f"Test/{cat}/Perplexity": val
+                            f"Test/{cat}/Recovery": val
                             for cat, val in test_subcat_recovery.items()
                         },
                     }
@@ -122,7 +122,7 @@ class Exp:
                         **train_log,
                         **valid_log,
                         **test_log,
-                        "lr": self.method.scheduler.get_lr(),
+                        "lr": self.method.scheduler.get_lr()[0],
                     }
                 )
 

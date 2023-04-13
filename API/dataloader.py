@@ -31,7 +31,7 @@ def load_data(
         num_workers=num_workers,
         collate_fn=collate_fn,
     )
-    trian_loader = default_loader(train_set, shuffle=True)
+    train_loader = default_loader(train_set, shuffle=True)
     valid_loader = default_loader(valid_set, shuffle=False)
     test_loader = default_loader(test_set, shuffle=False)
 
