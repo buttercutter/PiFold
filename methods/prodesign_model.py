@@ -157,15 +157,17 @@ class ProDesign_Model(nn.Module):
         randn = torch.rand(mask.shape, device=X.device) + 5
         decoding_order = torch.argsort(
             -mask * (torch.abs(randn))
-        )  # 我们的mask=1代表数据可用, 而protein MPP的mask=1代表数据不可用，正好相反
+        )  # Our mask=1 represents available data, while protein MPP's mask=1 represents unavailable data, which is the opposite
+        # 我们的mask=1代表数据可用, 而protein MPP的mask=1代表数据不可用，正好相反
         mask_size = mask.shape[1]
         permutation_matrix_reverse = torch.nn.functional.one_hot(
             decoding_order, num_classes=mask_size
         ).float()
+        # Compute mask q->p when q is known
         # 计算q已知的情况下, q->p的mask,
         order_mask_backward = torch.einsum(
             "ij, biq, bjp->bqp",
-            (1 - torch.triu(torch.ones(mask_size, mask_size, device=device))),
+            torch.tril(torch.ones(mask_size, mask_size, device=device), diagonal=-1),
             permutation_matrix_reverse,
             permutation_matrix_reverse,
         )
