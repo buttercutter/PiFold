@@ -104,11 +104,8 @@ class Exp:
                 if self.args.test_every_epoch or recorder.counter == 0:
                     test_perplexity, test_recovery, test_subcat_recovery = self.test()
                 else:
-                    test_perplexity, test_recovery, test_subcat_recovery = (
-                        np.nan,
-                        np.nan,
-                        {},
-                    )
+                    test_subcat_recovery = {}
+                    test_perplexity, test_recovery = np.nan, np.nan
 
                 if self.args.wandb_project:
                     valid_log = {
