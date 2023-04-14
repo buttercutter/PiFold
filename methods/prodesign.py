@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,6 +17,9 @@ class ProDesign(Base_method):
         self.model = self._build_model()
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer, self.scheduler = self._init_optimizer(steps_per_epoch)
+        self.transfer_func = lambda x: x
+        if self.args.use_gpu:
+            self.transfer_func = partial(cuda, device=self.device)
 
     def _build_model(self):
         return ProDesign_Model(self.args).to(self.device)
@@ -26,7 +31,7 @@ class ProDesign(Base_method):
         train_pbar = tqdm(train_loader)
         for step_idx, batch in enumerate(train_pbar):
             self.optimizer.zero_grad()
-            X, S, score, mask, lengths = cuda(batch, device=self.device)
+            X, S, score, mask, lengths = self.transfer_func(batch)
             (
                 X,
                 S,
@@ -71,7 +76,7 @@ class ProDesign(Base_method):
         valid_pbar = tqdm(valid_loader)
         with torch.no_grad():
             for step_idx, batch in enumerate(valid_pbar):
-                X, S, score, mask, lengths = cuda(batch, device=self.device)
+                X, S, score, mask, lengths = self.transfer_func(batch)
                 (
                     X,
                     S,
@@ -112,7 +117,7 @@ class ProDesign(Base_method):
 
         with torch.no_grad():
             for step_idx, batch in enumerate(test_pbar):
-                X, S, score, mask, lengths = cuda(batch, device=self.device)
+                X, S, score, mask, lengths = self.transfer_func(batch)
                 (
                     X,
                     S,

@@ -24,13 +24,13 @@ def _full_dist(
     # TODO: hypnopump@ rethink this to mask non-neighs as maxdist + 1: easier.
     # (B, N, N)
     sqmask = mask[..., None, :] * mask[..., None]
-    bool_sqmask = sqmask.bool()
     D = th.cdist(X, X, p=2, compute_mode="donot_use_mm_for_euclid_dist")
-    D.masked_fill_(~bool_sqmask, 0.0)
-    D.add_(sqmask.mul(-1000.0))
-    # non-priority for non-neighbors, row-wise
+    # bias by sequence distance: further apart = higher distance
+    pair_idist = th.arange(D.shape[-1], device=D.device, dtype=D.dtype)
+    pair_idist = (pair_idist[None] - pair_idist[:, None]).abs().mul_(1e-5)
+    D = D + pair_idist[(*(None,) * (D.ndim - 2), ...)]
+    # increase dist of non-neighbors to max for node
     D.add_((1.0 - sqmask) * D.amax(dim=-1, keepdim=True).detach_().add_(1.0))
-    # select top_k neighbours for each atom
     D_neighbors, E_idx = th.topk(D, min(top_k, D.shape[-1]), dim=-1, largest=False)
     return D_neighbors, E_idx
 
@@ -70,6 +70,7 @@ def _get_features(
     D_neighbors, E_idx = _full_dist(X=X_ca, mask=mask, top_k=top_k)
 
     mask_attend = gather_nodes(mask_bool.unsqueeze(-1), E_idx).squeeze(-1)
+    mask_attend = (mask.unsqueeze(-1) * mask_attend) == 1
     edge_mask_select = lambda x: th.masked_select(x, mask_attend[..., None]).reshape(
         -1, x.shape[-1]
     )
@@ -122,57 +123,65 @@ def _get_features(
         # (b, n, f=3, d)
         frame = th.stack([a, b, c], dim=-2)
         # (v d), (b, n, f=3, d) -> (b n v d)
-        atom_vs = virtual_atoms[(*(None,)*(frame.ndim - virtual_atoms.ndim), ...)]
+        atom_vs = virtual_atoms[(*(None,) * (frame.ndim - virtual_atoms.ndim), ...)]
         atom_vs = atom_vs @ frame + atom_Ca[..., None, :]
-
 
     # Node distances
     # Ca-N, Ca-C, Ca-O, N-C, N-O, O-C
 
     # (b n c d) -> (b n c c d) -> (b n triu(c c) rbf)
-    row_aidxs, cols_aidxs = torch.triu_indices(X.shape[-2], X.shape[-2], offset=1)
+    row_aidxs, cols_aidxs = torch.triu_indices(
+        X.shape[-2], X.shape[-2], offset=1, device=X.device
+    )
     anode_rbf = _get_rbf(X[..., None, :], X[..., None, :, :], None, num_rbf).squeeze()
-    node_dist = [*anode_rbf[..., row_aidxs, cols_aidxs, :].unbind(dim=-2)]
+    V_dist = [*anode_rbf[..., row_aidxs, cols_aidxs, :].unbind(dim=-2)]
 
     if virtual_num > 0:
         # FIXME: hypnopump@ original code passes tril + triu -> but its symmetric. reuduce to triu
-        # row_vidxs, cols_vidxs = torch.triu_indices(atom_vs.shape[-2], atom_vs.shape[-2], offset=1)
-        row_vidxs, cols_vidxs = (~torch.eye(atom_vs.shape[-2], dtype=torch.bool)).nonzero(as_tuple=True)
+        # row_vidxs, cols_vidxs = torch.triu_indices(atom_vs.shape[-2], atom_vs.shape[-2], offset=1, device=X.device)
+        row_vidxs, cols_vidxs = (
+            ~torch.eye(atom_vs.shape[-2], dtype=torch.bool)
+        ).nonzero(as_tuple=True)
 
         # (b n v d) -> (b n v v d) -> (b n triu(v v) rbf)
-        vnode_rbf = _get_rbf(atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf).squeeze()
-        node_dist += [*vnode_rbf[..., row_vidxs, cols_vidxs, :].unbind(dim=-2)]
+        vnode_rbf = _get_rbf(
+            atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf
+        ).squeeze()
+        V_dist += [*vnode_rbf[..., row_vidxs, cols_vidxs, :].unbind(dim=-2)]
 
     # p x (b n rbf) -> (masked(b n), (p rbf))
-    V_dist = th.cat(list(map(node_mask_select, node_dist)), dim=-1)
+    V_dist = th.cat(list(map(node_mask_select, V_dist)), dim=-1)
 
     # Batched Edge distance encoding
     # CA-CA, CA-C, C-CA, CA-N, N-CA, CA-O, O-CA, C-C, C-N, N-C, C-O, O-C, N-N, N-O, O-N, O-O
 
     # (b n c d), (b, n, k) -> (c, b, n, d), (c, c, b, n, k)
     X_chain = X.transpose(-2, -3).transpose(-3, -4)
-    E_idx_chain = E_idx[None, None].expand(X_chain.shape[0], X_chain.shape[0], *(-1,)*E_idx.ndim)
+    E_idx_chain = E_idx[None, None].expand(
+        X_chain.shape[0], X_chain.shape[0], *(-1,) * E_idx.ndim
+    )
 
     # (c b n d) -> (c c b n n) -> (c c b n k) -> c^2 x ((b n), k)
     pair_rbfs = _get_rbf(X_chain[None], X_chain[:, None], E_idx_chain, num_rbf)
-    edge_dist = [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
+    E_dist = [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
     if virtual_num > 0:
         # (b n v d), (b, n, k) -> (v, b, n, d), (v v, b, n, k)
         X_virt = atom_vs.transpose(-2, -3).transpose(-3, -4)
-        E_idx_virt = E_idx[None, None].expand(X_virt.shape[0], X_virt.shape[0], *(-1,) * E_idx.ndim)
+        E_idx_virt = E_idx[None, None].expand(
+            X_virt.shape[0], X_virt.shape[0], *(-1,) * E_idx.ndim
+        )
 
         # FIXME: hypnopump@ keep diagonal as original code but seems nonsense
         # (v b n d) -> (v v b n n) -> (v v b n k) -> v^2 x (b n k)
         pair_rbfs = _get_rbf(X_virt[None], X_virt[:, None], E_idx_virt, num_rbf)
-        edge_dist += [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
+        E_dist += [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
     # q x (b n k rbf) -> (masked(b n k), (q rbf))
-    E_dist = th.cat(list(map(edge_mask_select, edge_dist)), dim=-1)
+    E_dist = th.cat(list(map(edge_mask_select, E_dist)), dim=-1)
 
     # stack node, edge feats
     h_V = []
-    print("V_dist shape", V_dist.shape, "V_angles shape", V_angles.shape, "V_direct shape", V_direct.shape)
     if node_dist:
         h_V.append(V_dist)
     if node_angle:
@@ -191,17 +200,21 @@ def _get_features(
     _V = th.cat(h_V, dim=-1)
     _E = th.cat(h_E, dim=-1)
 
-    # edge index
-    shift = mask.sum(dim=1).cumsum(dim=0) - mask.sum(dim=1)
-    src = shift.view(B, 1, 1) + E_idx
+    # edge index. mask is (b, n)
+    shift = (mask.sum(dim=1).cumsum(dim=0) - mask.sum(dim=1))[
+        ..., None, None
+    ].long()  # (b, 1, 1)
+    src = shift + E_idx
     src = th.masked_select(src, mask_attend).view(1, -1)
-    dst = shift.view(B, 1, 1) + th.arange(0, N, device=src.device).view(
-        1, -1, 1
-    ).expand_as(mask_attend)
+    dst = shift + th.arange(0, N, device=src.device)[None, :, None].expand_as(
+        mask_attend
+    )
     dst = th.masked_select(dst, mask_attend).view(1, -1)
     E_idx = th.cat((dst, src), dim=0).long()
 
-    decoding_order = node_mask_select((decoding_order + shift.view(-1, 1)).unsqueeze(-1))
+    decoding_order = node_mask_select(
+        (decoding_order + shift.view(-1, 1)).unsqueeze(-1)
+    )
     decoding_order = decoding_order.squeeze().long()
 
     # 3D point, (B, N, C, 3) -> (masked(B N), C, 3)
