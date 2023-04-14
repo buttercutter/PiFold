@@ -7,6 +7,20 @@ from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_no
 
 from .common import Linear
 from .prodesign_module import *
+from typing import Any
+
+
+def _full_dist(X, mask, top_k=30, eps=1e-6):
+    mask_2D = torch.unsqueeze(mask, 1) * torch.unsqueeze(mask, 2)
+    dX = torch.unsqueeze(X, 1) - torch.unsqueeze(X, 2)
+    D = (1.0 - mask_2D) * 10000 + mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
+
+    D_max, _ = torch.max(D, -1, keepdim=True)
+    D_adjust = D + (1.0 - mask_2D) * (D_max + 1)
+    D_neighbors, E_idx = torch.topk(
+        D_adjust, min(top_k, D_adjust.shape[-1]), dim=-1, largest=False
+    )
+    return D_neighbors, E_idx
 
 
 class ProDesign_Model(nn.Module):
@@ -126,24 +140,13 @@ class ProDesign_Model(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def _full_dist(self, X, mask, top_k=30, eps=1e-6):
-        mask_2D = torch.unsqueeze(mask, 1) * torch.unsqueeze(mask, 2)
-        dX = torch.unsqueeze(X, 1) - torch.unsqueeze(X, 2)
-        D = (1.0 - mask_2D) * 10000 + mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
-
-        D_max, _ = torch.max(D, -1, keepdim=True)
-        D_adjust = D + (1.0 - mask_2D) * (D_max + 1)
-        D_neighbors, E_idx = torch.topk(
-            D_adjust, min(top_k, D_adjust.shape[-1]), dim=-1, largest=False
-        )
-        return D_neighbors, E_idx
-
-    def _get_features(self, S, score, X, mask):
+    @classmethod
+    def _get_features(cls, S, score, X, mask, args: Any, top_k: int, virtual_atoms: torch.Tensor, num_rbf: int):
         device = X.device
         mask_bool = mask == 1
         B, N, _, _ = X.shape
         X_ca = X[:, :, 1, :]
-        D_neighbors, E_idx = self._full_dist(X_ca, mask, self.top_k)
+        D_neighbors, E_idx = _full_dist(X_ca, mask, top_k)
 
         mask_attend = gather_nodes(mask.unsqueeze(-1), E_idx).squeeze(-1)
         mask_attend = (mask.unsqueeze(-1) * mask_attend) == 1
@@ -198,11 +201,11 @@ class ProDesign_Model(nn.Module):
         c = atom_C - atom_Ca
         a = torch.cross(b, c, dim=-1)
 
-        if self.args.virtual_num > 0:
-            virtual_atoms = self.virtual_atoms / torch.norm(
-                self.virtual_atoms, dim=1, keepdim=True
+        if args.virtual_num > 0:
+            virtual_atoms = virtual_atoms / torch.norm(
+                virtual_atoms, dim=1, keepdim=True
             )
-            for i in range(self.virtual_atoms.shape[0]):
+            for i in range(virtual_atoms.shape[0]):
                 vars()["atom_v" + str(i)] = (
                     virtual_atoms[i][0] * a
                     + virtual_atoms[i][1] * b
@@ -220,13 +223,24 @@ class ProDesign_Model(nn.Module):
                         vars()["atom_" + atom1],
                         vars()["atom_" + atom2],
                         None,
-                        self.num_rbf,
+                        num_rbf,
                     ).squeeze()
                 )
             )
 
-        if self.args.virtual_num > 0:
-            for i in range(self.virtual_atoms.shape[0]):
+        if args.virtual_num > 0:
+
+            rbf = _get_rbf(
+                vars()["atom_v" + str(1)],
+                vars()["atom_v" + str(0)],
+                None,
+                num_rbf,
+            ).squeeze()
+            print("rbf shape", rbf.shape)
+            print("edge mask shape", node_mask_select(rbf).shape)
+
+
+            for i in range(virtual_atoms.shape[0]):
                 # # true atoms
                 for j in range(0, i):
                     node_dist.append(
@@ -235,7 +249,7 @@ class ProDesign_Model(nn.Module):
                                 vars()["atom_v" + str(i)],
                                 vars()["atom_v" + str(j)],
                                 None,
-                                self.num_rbf,
+                                num_rbf,
                             ).squeeze()
                         )
                     )
@@ -245,7 +259,7 @@ class ProDesign_Model(nn.Module):
                                 vars()["atom_v" + str(j)],
                                 vars()["atom_v" + str(i)],
                                 None,
-                                self.num_rbf,
+                                num_rbf,
                             ).squeeze()
                         )
                     )
@@ -276,19 +290,28 @@ class ProDesign_Model(nn.Module):
         for pair in pair_lst:
             atom1, atom2 = pair.split("-")
             rbf = _get_rbf(
-                vars()["atom_" + atom1], vars()["atom_" + atom2], E_idx, self.num_rbf
+                vars()["atom_" + atom1], vars()["atom_" + atom2], E_idx, num_rbf
             )
             edge_dist.append(edge_mask_select(rbf))
 
-        if self.args.virtual_num > 0:
-            for i in range(self.virtual_atoms.shape[0]):
+        if args.virtual_num > 0:
+
+            rbf = _get_rbf(
+                vars()["atom_v" + str(i)],
+                vars()["atom_v" + str(i)],
+                E_idx,
+                num_rbf,
+            )
+            print("rbf shape", rbf.shape)
+            print("edge mask shape", edge_mask_select(rbf).shape)
+            for i in range(virtual_atoms.shape[0]):
                 edge_dist.append(
                     edge_mask_select(
                         _get_rbf(
                             vars()["atom_v" + str(i)],
                             vars()["atom_v" + str(i)],
                             E_idx,
-                            self.num_rbf,
+                            num_rbf,
                         )
                     )
                 )
@@ -299,7 +322,7 @@ class ProDesign_Model(nn.Module):
                                 vars()["atom_v" + str(i)],
                                 vars()["atom_v" + str(j)],
                                 E_idx,
-                                self.num_rbf,
+                                num_rbf,
                             )
                         )
                     )
@@ -309,27 +332,29 @@ class ProDesign_Model(nn.Module):
                                 vars()["atom_v" + str(j)],
                                 vars()["atom_v" + str(i)],
                                 E_idx,
-                                self.num_rbf,
+                                num_rbf,
                             )
                         )
                     )
 
         E_dist = torch.cat(tuple(edge_dist), dim=-1)
 
+        print("v_dist", V_dist.shape)
+
         h_V = []
-        if self.args.node_dist:
+        if args.node_dist:
             h_V.append(V_dist)
-        if self.args.node_angle:
+        if args.node_angle:
             h_V.append(V_angles)
-        if self.args.node_direct:
+        if args.node_direct:
             h_V.append(V_direct)
 
         h_E = []
-        if self.args.edge_dist:
+        if args.edge_dist:
             h_E.append(E_dist)
-        if self.args.edge_angle:
+        if args.edge_angle:
             h_E.append(E_angles)
-        if self.args.edge_direct:
+        if args.edge_direct:
             h_E.append(E_direct)
 
         _V = torch.cat(h_V, dim=-1)
