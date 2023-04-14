@@ -158,7 +158,7 @@ def _get_features(
         ).squeeze()
         sele_rbf = node_mask_select(rbf)
         print("atom_v1", vars()["atom_v" + str(i)].shape)
-        print("rbf", rbf.shape, "sele_rbf.shape", sele_rbf.shape)
+        print("rbf", rbf.shape, "mask_bool", mask_bool.shape, "sele_rbf.shape", sele_rbf.shape)
 
         for i in range(virtual_atoms.shape[0]):
             # # true atoms
