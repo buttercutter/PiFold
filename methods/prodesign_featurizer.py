@@ -137,7 +137,7 @@ def _get_features(
     if virtual_num > 0:
         # FIXME: hypnopump@ original code passes tril + triu -> but its symmetric. reuduce to triu
         # row_vidxs, cols_vidxs = torch.triu_indices(atom_vs.shape[-2], atom_vs.shape[-2], offset=1)
-        row_vidxs, cols_vidxs = torch.eye(atom_vs.shape[-2], dtype=torch.bool).nonzero(as_tuple=True
+        row_vidxs, cols_vidxs = (~torch.eye(atom_vs.shape[-2], dtype=torch.bool)).nonzero(as_tuple=True)
 
         # (b n v d) -> (b n v v d) -> (b n triu(v v) rbf)
         vnode_rbf = _get_rbf(atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf).squeeze()
