@@ -93,6 +93,7 @@ def _rbf(D, num_rbf):
     return RBF
 
 def _get_rbf(A, B, E_idx=None, num_rbf=16):
+    print("A.shape: ", A.shape, "B.shape: ", B.shape, "cdist shape, ", torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6).shape)
     if E_idx is not None:
         D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
