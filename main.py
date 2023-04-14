@@ -136,6 +136,9 @@ class Exp:
                 logging.info("Early stopping")
                 break
 
+        # scheduler.step() should be invoked after each batch instead of after each epoch
+        self.method.scheduler.step()
+
         best_model_path = osp.join(self.path, "checkpoint.pth")
         self.method.model.load_state_dict(torch.load(best_model_path))
 

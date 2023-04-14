@@ -46,7 +46,9 @@ class ProDesign(Base_method):
             # TODO: hypnopump@ see UniFold paper for comparison, and OpenFold for an implementation
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
             self.optimizer.step()
-            self.scheduler.step()
+
+            # scheduler.step() should be invoked after each batch instead of after each epoch
+            # self.scheduler.step()
 
             if isinstance(train_sum, int):
                 train_sum = torch.sum(loss * mask)
