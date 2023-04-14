@@ -236,8 +236,6 @@ class ProDesign_Model(nn.Module):
                 None,
                 num_rbf,
             ).squeeze()
-            print("rbf shape", rbf.shape, mask_bool.shape )
-            print("node feats shape", node_mask_select(rbf).shape)
 
 
             for i in range(virtual_atoms.shape[0]):
@@ -302,8 +300,6 @@ class ProDesign_Model(nn.Module):
                 E_idx,
                 num_rbf,
             )
-            print("rbf shape", rbf.shape)
-            print("edge mask shape", edge_mask_select(rbf).shape)
             for i in range(virtual_atoms.shape[0]):
                 edge_dist.append(
                     edge_mask_select(
@@ -339,7 +335,6 @@ class ProDesign_Model(nn.Module):
 
         E_dist = torch.cat(tuple(edge_dist), dim=-1)
 
-        print("v_dist", V_dist.shape)
 
         h_V = []
         if args.node_dist:
