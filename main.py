@@ -9,7 +9,7 @@ import torch
 warnings.filterwarnings("ignore")
 
 import logging
-
+from pathlib import Path
 from API import Recorder
 from methods import ProDesign
 from utils import *
@@ -66,10 +66,17 @@ class Exp:
         if self.args.method == "ProDesign":
             self.method = ProDesign(self.args, self.device, steps_per_epoch)
 
+        # load a pretrained model
+        if self.args.from_pretrained is not None:
+            if Path.isfile(self.args.pretrained_model):
+                logger.info(f"Loading checkpoint '{self.args.pretrained_model}'")
+                self.method.model.load_state_dict(torch.load(self.args.pretrained_model, map_location=self.device))
+            else:
+                logger.error(f"Could not load '{self.args.pretrained_model}' and starting from scratch")
+
     def _get_data(self):
-        self.train_loader, self.valid_loader, self.test_loader = get_dataset(
-            self.config
-        )
+        data = get_dataset(self.config)
+        self.train_loader, self.valid_loader, self.test_loader = data
 
     def train(self):
         recorder = Recorder(self.args.patience, verbose=True)
