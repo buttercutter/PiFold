@@ -3,6 +3,7 @@ import time
 import torch
 import torch as th
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
@@ -69,10 +70,10 @@ def _get_features(
     D_neighbors, E_idx = _full_dist(X=X_ca, mask=mask, top_k=top_k)
 
     mask_attend = gather_nodes(mask_bool.unsqueeze(-1), E_idx).squeeze(-1)
-    edge_mask_select = lambda x: th.masked_select(x, mask_attend.unsqueeze(-1)).reshape(
+    edge_mask_select = lambda x: th.masked_select(x, mask_attend[..., None]).reshape(
         -1, x.shape[-1]
     )
-    node_mask_select = lambda x: th.masked_select(x, mask_bool.unsqueeze(-1)).reshape(
+    node_mask_select = lambda x: th.masked_select(x, mask_bool[..., None]).reshape(
         -1, x.shape[-1]
     )
 
@@ -116,6 +117,7 @@ def _get_features(
 
     # 'Ca-N', 'Ca-C', 'Ca-O', 'N-C', 'N-O', 'O-C'
 
+
     node_list = ["Ca-N", "Ca-C", "Ca-O", "N-C", "N-O", "O-C"]
     node_dist = []
     for pair in node_list:
@@ -136,6 +138,7 @@ def _get_features(
         a = th.cross(b, c, dim=-1)
         # frame = th.stack([a, b, c], dim=-1)
         # atom_vs = virtual_atoms @ frame + atom_Ca
+        print("virtual_atoms", virtual_atoms.shape)
         for i in range(virtual_atoms.shape[0]):
             vars()["atom_v" + str(i)] = (
                 virtual_atoms[i][0] * a
@@ -143,9 +146,20 @@ def _get_features(
                 + virtual_atoms[i][2] * c
                 + 1 * atom_Ca
             )
+            print("atom_v" + str(i), vars()["atom_v" + str(i)].shape)
 
         # FIXME: hypnopump@ do (B, N, V, 3) -> (B, N, V, V, RBF) -> (B, N, (V, V, RBF))
         # FIXME: hypnopump@ will required batch implementations downstream
+        rbf = _get_rbf(
+            vars()["atom_v" + str(1)],
+            vars()["atom_v" + str(0)],
+            None,
+            num_rbf,
+        ).squeeze()
+        sele_rbf = node_mask_select(rbf)
+        print("atom_v1", vars()["atom_v" + str(i)].shape)
+        print("rbf", rbf.shape, "sele_rbf.shape", sele_rbf.shape)
+
         for i in range(virtual_atoms.shape[0]):
             # # true atoms
             for j in range(0, i):
@@ -231,6 +245,8 @@ def _get_features(
                 )
 
     E_dist = th.cat(edge_dist, dim=-1)
+
+    print("vdist shape", V_dist.shape, "v_angle shape", V_angles.shape, "v_direct shape", V_direct.shape)
 
     # stack node, edge feats
     h_V = []

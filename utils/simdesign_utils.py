@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import torch as th
 import torch.nn.functional as F
+from functools import partial
+from typing import Optional
 
 """
 Notation:
@@ -104,17 +106,15 @@ def _dihedrals(
     u_2 = U[:, 2:, :]  # N-C, CA-N, C-CA, ...
 
     # Dihedrals: (b, n, c, 2)
-    u1u2_cross = th.cross(u1, u2, dim=-1)
+    u1u2_cross = th.cross(u_1, u_2, dim=-1)
 
     D = th.atan2(
-        (th.norm(u0, dim=-1, keepdim=True) * u1 * u1u2_cross).sum(-1),
-        (th.cross(u0, u1, dim=-1) * u1u2_cross).sum(1),
+        (th.norm(u_0, dim=-1, keepdim=True) * u_1 * u1u2_cross).sum(-1),
+        (th.cross(u_0, u_1, dim=-1) * u1u2_cross).sum(-1),
     )
     D.masked_fill_(D.isnan(), 0.0)
     D = F.pad(D, (1, 2), "constant", 0)  # (B, (N C)-1)
     Dih = D.view(D.shape[0], D.shape[1] // 3, 3)  # (B, N, C)
-
-    Dihedral_Angle_features = torch.cat((torch.cos(D), torch.sin(D)), 2)
 
     # alpha, beta, gamma
     cosD = (
@@ -146,6 +146,7 @@ def _orientations_coarse_gl_tuple(
     * E_direct: [B, N, K, ???]
     * q: [???, 4] quaternion
     """
+    print("Initial x shape", X.shape)
     V = X.clone()
     X = X[:, :, :3, :].reshape(X.shape[0], 3 * X.shape[1], 3)  # (b, (n c), 3)
     # TODO: hypnopump@ compute frames only once per protein
@@ -165,7 +166,8 @@ def _orientations_coarse_gl_tuple(
 
     # FIXME: hypnopump@ in batched model
     Q_neighbors = gather_nodes(Q, E_idx)  # (b, n(?), k, 3*3)
-    XNCO_neighbors = map(partial(gather_nodes, neighbor_idx=E_idx), X.unbind(dim=-2))
+    print("x.shape", X.shape)
+    XNCO_neighbors = map(partial(gather_nodes, neighbor_idx=E_idx), V.unbind(dim=-2))
 
     Q = Q.view(*Q.shape[:2], 1, 3, 3)  # (b, n, 1, 3, 3)
     Q_neighbors = Q_neighbors.view(*Q_neighbors.shape[:3], 3, 3)  # (b, n, k, 3, 3)
