@@ -135,8 +135,11 @@ def _get_features(
     node_dist = [*anode_rbf[..., row_aidxs, cols_aidxs, :].unbind(dim=-2)]
 
     if virtual_num > 0:
+        # FIXME: hypnopump@ original code passes tril + triu -> but its symmetric. reuduce to triu
+        # row_vidxs, cols_vidxs = torch.triu_indices(atom_vs.shape[-2], atom_vs.shape[-2], offset=1)
+        row_vidxs, cols_vidxs = torch.eye(atom_vs.shape[-2], dtype=torch.bool).nonzero(as_tuple=True
+
         # (b n v d) -> (b n v v d) -> (b n triu(v v) rbf)
-        row_vidxs, cols_vidxs = torch.triu_indices(atom_vs.shape[-2], atom_vs.shape[-2], offset=1)
         vnode_rbf = _get_rbf(atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf).squeeze()
         node_dist += [*vnode_rbf[..., row_vidxs, cols_vidxs, :].unbind(dim=-2)]
 
@@ -146,12 +149,12 @@ def _get_features(
     # Batched Edge distance encoding
     # CA-CA, CA-C, C-CA, CA-N, N-CA, CA-O, O-CA, C-C, C-N, N-C, C-O, O-C, N-N, N-O, O-N, O-O
 
-    # (b n c d), (b, n, k) -> (c, b, n, d), (c, b, n, k)
+    # (b n c d), (b, n, k) -> (c, b, n, d), (c, c, b, n, k)
     X_chain = X.transpose(-2, -3).transpose(-3, -4)
-    E_idx_chain = E_idx[None].expand(X_chain.shape[0], *(-1,)*E_idx.ndim)
+    E_idx_chain = E_idx[None, None].expand(X_chain.shape[0], X_chain.shape[0], *(-1,)*E_idx.ndim)
 
-    # (c b n d) -> (c b n n) -> (c b n k) -> c x ((b n), k)
-    pair_rbfs = _get_rbf(X_chain, X_chain, E_idx_chain, num_rbf)
+    # (c b n d) -> (c c b n n) -> (c c b n k) -> c^2 x ((b n), k)
+    pair_rbfs = _get_rbf(X_chain[None], X_chain[:, None], E_idx_chain, num_rbf)
     edge_dist = [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
     if virtual_num > 0:
@@ -169,6 +172,7 @@ def _get_features(
 
     # stack node, edge feats
     h_V = []
+    print("V_dist shape", V_dist.shape, "V_angles shape", V_angles.shape, "V_direct shape", V_direct.shape)
     if node_dist:
         h_V.append(V_dist)
     if node_angle:
