@@ -73,6 +73,11 @@ class Exp:
 
     def train(self):
         recorder = Recorder(self.args.patience, verbose=True)
+
+        # for resuming from saved model checkpoint
+        # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html
+        self.method.scheduler.last_epoch = self.args.last_epoch
+
         for epoch in range(self.args.epoch):
             train_loss, train_perplexity = self.method.train_one_epoch(
                 self.train_loader
@@ -128,6 +133,7 @@ class Exp:
                         **valid_log,
                         **test_log,
                         "lr": self.method.scheduler.get_lr()[0],
+                        "last_epoch": epoch,
                     }
                 )
 
