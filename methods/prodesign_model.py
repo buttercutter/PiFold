@@ -333,6 +333,7 @@ class ProDesign_Model(nn.Module):
 
 
         h_V = []
+        print("V_dist shape", V_dist.shape, "V_angles shape", V_angles.shape, "V_direct shape", V_direct.shape)
         if args.node_dist:
             h_V.append(V_dist)
         if args.node_angle:
