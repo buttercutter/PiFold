@@ -1,11 +1,11 @@
 from collections.abc import Mapping, Sequence
+from functools import partial
+from typing import Optional
 
 import numpy as np
 import torch
 import torch as th
 import torch.nn.functional as F
-from functools import partial
-from typing import Optional
 
 """
 Notation:
@@ -20,7 +20,13 @@ Notation:
 """
 
 
-safe_cdist = partial(th.cdist, compute_mode="donot_use_mm_for_euclid_dist")
+def safe_cdist(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """Manual op is faster on CUDA than torch.cdist. (but not in CPU)."""
+    if X.is_cuda:
+        return th.cdist(X, Y, compute_mode="donot_use_mm_for_euclid_dist")
+    return th.sqrt(
+        th.sum((X[..., None, :] - Y[..., None, :, :]).square(), dim=-1).add_(eps)
+    )
 
 
 # Thanks for StructTrans

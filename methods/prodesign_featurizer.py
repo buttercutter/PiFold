@@ -24,7 +24,8 @@ def _full_dist(
     # TODO: hypnopump@ rethink this to mask non-neighs as maxdist + 1: easier.
     # (B, N, N)
     sqmask = mask[..., None, :] * mask[..., None]
-    D = th.cdist(X, X, p=2, compute_mode="donot_use_mm_for_euclid_dist")
+    sqcdist = th.sum((X[..., None, :] - X[..., None, :, :]).square(), dim=-1)
+    D = th.sqrt(sqcdist.add_(eps))
     # bias by sequence distance: further apart = higher distance
     pair_idist = th.arange(D.shape[-1], device=D.device, dtype=D.dtype)
     pair_idist = (pair_idist[None] - pair_idist[:, None]).abs().mul_(1e-5)
