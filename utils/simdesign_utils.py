@@ -76,7 +76,7 @@ def _get_rbf(
     B: torch.Tensor,
     E_idx: Optional[torch.Tensor] = None,
     num_rbf: int = 16,
-    eps: float = 1e-6
+    eps: float = 1e-6,
 ) -> torch.Tensor:
     """(B, L1, D), (D, L2, D) -> (B, L1, L2, num_rbf)
     Optionally supports edges in the form of (B, L1, K) -> (B, L1, K, num_rbf)

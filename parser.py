@@ -41,7 +41,7 @@ def create_parser():
     parser.add_argument("--node_features", default=128, type=int)
     parser.add_argument("--edge_features", default=128, type=int)
     parser.add_argument("--k_neighbors", default=30, type=int)
-    parser.add_argument("--dropout", default=0.1, type=int)
+    parser.add_argument("--dropout", default=0.1, type=float)
     parser.add_argument("--num_encoder_layers", default=10, type=int)
     parser.add_argument(
         "--checkpoint",
@@ -49,6 +49,7 @@ def create_parser():
         type=int,
         help="Per encoder layer checkpointing to reduce mem usage",
     )
+    parser.add_argument("--from_pretrained", default=None, type=str)
 
     # Training parameters
     parser.add_argument("--epoch", default=100, type=int, help="end epoch")

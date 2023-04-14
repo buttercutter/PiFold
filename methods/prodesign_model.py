@@ -251,6 +251,7 @@ class ProDesign_Model(nn.Module):
                     )
         V_dist = torch.cat(tuple(node_dist), dim=-1).squeeze()
 
+
         # TODO: hypnopump@ consider replace with itertools.product + '-'.join()
         pair_lst = [
             "Ca-Ca",
