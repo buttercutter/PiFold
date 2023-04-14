@@ -52,6 +52,13 @@ def create_parser():
 
     # Training parameters
     parser.add_argument("--epoch", default=100, type=int, help="end epoch")
+    parser.add_argument(
+        "--last_epoch",
+        default=44,
+        type=int,
+        help="the last epoch num computed in previous unfinished run, this is used for resuming from saved model checkpoint",
+    )
+
     parser.add_argument("--log_step", default=1, type=int)
     parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
     parser.add_argument("--patience", default=100, type=int)
