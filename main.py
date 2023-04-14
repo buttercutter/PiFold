@@ -90,7 +90,6 @@ class Exp:
                 with torch.no_grad():
                     valid_loss, valid_perplexity = self.valid()
                     # self._save(name=str(epoch))
-                    test_perplexity, test_recovery, test_subcat_recovery = self.test()
 
                 print_log(
                     (
@@ -102,6 +101,12 @@ class Exp:
 
                 recorder(valid_loss, self.method.model, self.path)
 
+                if self.args.test_every_epoch or recorder.counter == 0:
+                    test_perplexity, test_recovery, test_subcat_recovery = self.test()
+                else:
+                    test_subcat_recovery = {}
+                    test_perplexity, test_recovery = np.nan, np.nan
+
                 if self.args.wandb_project:
                     valid_log = {
                         "Val/Loss": valid_loss,
@@ -111,7 +116,7 @@ class Exp:
                         "Test/Perplexity": test_perplexity,
                         "Test/Recovery": test_recovery,
                         **{
-                            f"Test/{cat}/Perplexity": val
+                            f"Test/{cat}/Recovery": val
                             for cat, val in test_subcat_recovery.items()
                         },
                     }
@@ -122,7 +127,7 @@ class Exp:
                         **train_log,
                         **valid_log,
                         **test_log,
-                        "lr": self.method.scheduler.get_lr(),
+                        "lr": self.method.scheduler.get_lr()[0],
                     }
                 )
 
