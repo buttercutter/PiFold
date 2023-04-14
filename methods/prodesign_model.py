@@ -236,8 +236,8 @@ class ProDesign_Model(nn.Module):
                 None,
                 num_rbf,
             ).squeeze()
-            print("rbf shape", rbf.shape)
-            print("edge mask shape", node_mask_select(rbf).shape)
+            print("rbf shape", rbf.shape, mask_bool.shape )
+            print("node feats shape", node_mask_select(rbf).shape)
 
 
             for i in range(virtual_atoms.shape[0]):

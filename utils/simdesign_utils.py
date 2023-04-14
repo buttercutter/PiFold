@@ -100,6 +100,8 @@ def _get_rbf(A, B, E_idx=None, num_rbf=16):
     else:
         D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,:,None,:])**2,-1) + 1e-6) #[B, L, L]
         RBF_A_B = _rbf(D_A_B, num_rbf)
+
+    print("RBF_A_B.shape: ", RBF_A_B.shape, "D_A_B.shape: ", D_A_B.shape, E_idx.shape if E_idx is not None else None)
     return RBF_A_B
 
 def _orientations_coarse_gl(X, E_idx, eps=1e-6):
