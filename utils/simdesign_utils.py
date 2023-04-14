@@ -83,7 +83,9 @@ def _get_rbf(
     D_A_B = safe_cdist(A, B)  # [B, L1, L2]
     if E_idx is not None:
         D_A_B = batched_index_select(D_A_B, E_idx, dim=-1)  # [B, L1, K]
+
     RBF_A_B = _rbf(D_A_B, num_rbf)  # [B, L, X] (X = K or L2)
+    print('RBF_A_B.shape', RBF_A_B.shape, "D_A_B.shape", D_A_B.shape, E_idx.shape if E_idx is not None else None)
     return RBF_A_B
 
 
