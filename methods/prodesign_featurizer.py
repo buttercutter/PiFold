@@ -140,6 +140,7 @@ def _get_features(
         vnode_rbf = _get_rbf(atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf).squeeze()
         node_dist += [*vnode_rbf[..., row_vidxs, cols_vidxs, :].unbind(dim=-2)]
 
+    # p x (b n rbf) -> (masked(b n), (p rbf))
     V_dist = th.cat(list(map(node_mask_select, node_dist)), dim=-1)
 
     # Batched Edge distance encoding
@@ -151,7 +152,7 @@ def _get_features(
 
     # (c b n d) -> (c b n n) -> (c b n k) -> c x ((b n), k)
     pair_rbfs = _get_rbf(X_chain, X_chain, E_idx_chain, num_rbf)
-    edge_dist = [*pair_rbfs.reshape(pair_rbfs.shape[0], -1, num_rbf).unbind(dim=0)]
+    edge_dist = [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
     if virtual_num > 0:
         # (b n v d), (b, n, k) -> (v, b, n, d), (v v, b, n, k)
@@ -159,12 +160,11 @@ def _get_features(
         E_idx_virt = E_idx[None, None].expand(X_virt.shape[0], X_virt.shape[0], *(-1,) * E_idx.ndim)
 
         # FIXME: hypnopump@ keep diagonal as original code but seems nonsense
-        # (v b n d) -> (v v b n n) -> (v v b n k) -> v^2 x ((b n), k)
+        # (v b n d) -> (v v b n n) -> (v v b n k) -> v^2 x (b n k)
         pair_rbfs = _get_rbf(X_virt[None], X_virt[:, None], E_idx_virt, num_rbf)
-        edge_dist += [*pair_rbfs.reshape(pair_rbfs.shape[0]*pair_rbfs.shape[0], -1, num_rbf).unbind(dim=0)]
+        edge_dist += [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
-    for i, edge in enumerate(edge_dist):
-        print(i, edge.shape, mask_attend.shape)
+    # q x (b n k rbf) -> (masked(b n k), (q rbf))
     E_dist = th.cat(list(map(edge_mask_select, edge_dist)), dim=-1)
 
     # stack node, edge feats
