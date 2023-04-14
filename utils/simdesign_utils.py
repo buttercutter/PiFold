@@ -76,16 +76,19 @@ def _get_rbf(
     B: torch.Tensor,
     E_idx: Optional[torch.Tensor] = None,
     num_rbf: int = 16,
+    eps: float = 1e-6
 ) -> torch.Tensor:
     """(B, L1, D), (D, L2, D) -> (B, L1, L2, num_rbf)
     Optionally supports edges in the form of (B, L1, K) -> (B, L1, K, num_rbf)
     """
-    D_A_B = safe_cdist(A, B)  # [B, L1, L2]
-    if E_idx is not None:
-        D_A_B = batched_index_select(D_A_B, E_idx, dim=-1)  # [B, L1, K]
 
-    RBF_A_B = _rbf(D_A_B, num_rbf)  # [B, L, X] (X = K or L2)
-    print('RBF_A_B.shape', RBF_A_B.shape, "D_A_B.shape", D_A_B.shape, E_idx.shape if E_idx is not None else None)
+    if E_idx is not None:
+        D_A_B = safe_cdist(A, B)  # [B, L1, L2]
+        D_A_B = batched_index_select(D_A_B, E_idx, dim=-1)  # [B, L1, K]
+    else:
+        D_A_B = (A - B).square().sum(-1).add_(eps).sqrt()[..., None]  # [B, L1, 1]
+
+    RBF_A_B = _rbf(D_A_B, num_rbf)  # [B, L, X] (X = 1 or K)
     return RBF_A_B
 
 
@@ -148,7 +151,6 @@ def _orientations_coarse_gl_tuple(
     * E_direct: [B, N, K, ???]
     * q: [???, 4] quaternion
     """
-    print("Initial x shape", X.shape)
     V = X.clone()
     X = X[:, :, :3, :].reshape(X.shape[0], 3 * X.shape[1], 3)  # (b, (n c), 3)
     # TODO: hypnopump@ compute frames only once per protein
@@ -168,7 +170,6 @@ def _orientations_coarse_gl_tuple(
 
     # FIXME: hypnopump@ in batched model
     Q_neighbors = gather_nodes(Q, E_idx)  # (b, n(?), k, 3*3)
-    print("x.shape", X.shape)
     XNCO_neighbors = map(partial(gather_nodes, neighbor_idx=E_idx), V.unbind(dim=-2))
 
     Q = Q.view(*Q.shape[:2], 1, 3, 3)  # (b, n, 1, 3, 3)

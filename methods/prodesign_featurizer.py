@@ -138,7 +138,6 @@ def _get_features(
         a = th.cross(b, c, dim=-1)
         # frame = th.stack([a, b, c], dim=-1)
         # atom_vs = virtual_atoms @ frame + atom_Ca
-        print("virtual_atoms", virtual_atoms.shape)
         for i in range(virtual_atoms.shape[0]):
             vars()["atom_v" + str(i)] = (
                 virtual_atoms[i][0] * a
@@ -146,7 +145,6 @@ def _get_features(
                 + virtual_atoms[i][2] * c
                 + 1 * atom_Ca
             )
-            print("atom_v" + str(i), vars()["atom_v" + str(i)].shape)
 
         # FIXME: hypnopump@ do (B, N, V, 3) -> (B, N, V, V, RBF) -> (B, N, (V, V, RBF))
         # FIXME: hypnopump@ will required batch implementations downstream
@@ -157,8 +155,6 @@ def _get_features(
             num_rbf,
         ).squeeze()
         sele_rbf = node_mask_select(rbf)
-        print("atom_v1", vars()["atom_v" + str(i)].shape)
-        print("rbf", rbf.shape, "mask_bool", mask_bool.shape, "sele_rbf.shape", sele_rbf.shape)
 
         for i in range(virtual_atoms.shape[0]):
             # # true atoms
@@ -245,8 +241,6 @@ def _get_features(
                 )
 
     E_dist = th.cat(edge_dist, dim=-1)
-
-    print("vdist shape", V_dist.shape, "v_angle shape", V_angles.shape, "v_direct shape", V_direct.shape)
 
     # stack node, edge feats
     h_V = []
