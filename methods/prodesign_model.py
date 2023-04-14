@@ -230,14 +230,6 @@ class ProDesign_Model(nn.Module):
 
         if args.virtual_num > 0:
 
-            rbf = _get_rbf(
-                vars()["atom_v" + str(1)],
-                vars()["atom_v" + str(0)],
-                None,
-                num_rbf,
-            ).squeeze()
-
-
             for i in range(virtual_atoms.shape[0]):
                 # # true atoms
                 for j in range(0, i):
@@ -294,12 +286,16 @@ class ProDesign_Model(nn.Module):
 
         if args.virtual_num > 0:
 
+
             rbf = _get_rbf(
-                vars()["atom_v" + str(i)],
-                vars()["atom_v" + str(i)],
+                vars()["atom_v" + str(0)],
+                vars()["atom_v" + str(1)],
                 E_idx,
                 num_rbf,
             )
+            print("rbf of shape", rbf.shape)
+            print("edge_mask_select of shape", edge_mask_select(rbf).shape)
+
             for i in range(virtual_atoms.shape[0]):
                 edge_dist.append(
                     edge_mask_select(
