@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 
 import numpy as np
 import torch
@@ -15,7 +16,7 @@ class ProDesign(Base_method):
     def __init__(self, args, device, steps_per_epoch):
         Base_method.__init__(self, args, device, steps_per_epoch)
         self.model = self._build_model()
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(reduction="none")
         self.optimizer, self.scheduler = self._init_optimizer(steps_per_epoch)
         self.transfer_func = lambda x: x
         if self.args.use_gpu:
@@ -45,9 +46,23 @@ class ProDesign(Base_method):
                 decoding_order,
                 node_mask,
                 edge_mask,
-            ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
-            log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
+            ) = self.model._get_features(
+                S, score, X=X, mask=mask, mode=self.args.train_mode
+            )
+            log_probs = self.model(
+                h_V,
+                h_E,
+                E_idx,
+                batch_id,
+                mode=self.args.train_mode,
+                node_mask=node_mask,
+                edge_mask=edge_mask,
+            )
             loss = self.criterion(log_probs, S)
+            if self.args.train_mode == "dense":
+                # in this case loss is not reduced, and of shape (B, N, ...)
+                loss = loss[node_mask].mean()
+
             loss.backward()
             # TODO: hypnopump@ consider clipping gradients on a per-sample basis instead of per-batch. How ??? idk yet
             # TODO: hypnopump@ see UniFold paper for comparison, and OpenFold for an implementation
@@ -90,8 +105,20 @@ class ProDesign(Base_method):
                     mask_bw,
                     mask_fw,
                     decoding_order,
-                ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
+                    node_mask,
+                    edge_mask,
+                ) = self.model._get_features(
+                    S, score, X=X, mask=mask, mode=self.args.train_mode
+                )
+                log_probs = self.model(
+                    h_V,
+                    h_E,
+                    E_idx,
+                    batch_id,
+                    mode=self.args.train_mode,
+                    node_mask=node_mask,
+                    edge_mask=edge_mask,
+                )
                 loss = self.criterion(log_probs, S)
 
                 if isinstance(valid_sum, int):
@@ -133,8 +160,18 @@ class ProDesign(Base_method):
                     decoding_order,
                     node_mask,
                     edge_mask,
-                ) = self.model._get_features(S, score, X=X, mask=mask)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                ) = self.model._get_features(
+                    S, score, X=X, mask=mask, mode=self.args.train_mode
+                )
+                log_probs = self.model(
+                    h_V,
+                    h_E,
+                    E_idx,
+                    batch_id,
+                    mode=self.args.train_mode,
+                    node_mask=node_mask,
+                    edge_mask=edge_mask,
+                )
                 loss, loss_av = self.loss_nll_flatten(S, log_probs)
                 # TODO: hypnopump@ wtf ???
                 mask = torch.ones_like(loss)
@@ -189,8 +226,12 @@ class ProDesign(Base_method):
                     decoding_order,
                     node_mask,
                     edge_mask,
-                ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
+                ) = self.model._get_features(
+                    S, score, X=X, mask=mask, mode=self.args.train_mode
+                )
+                log_probs = self.model(
+                    h_V, h_E, E_idx, batch_id, mode=self.args.train_mode
+                )
                 S_pred = torch.argmax(log_probs, dim=1)
                 cmp = S_pred == S
                 recovery_ = cmp.float().mean().cpu().numpy()
@@ -219,14 +260,18 @@ class ProDesign(Base_method):
         recovery = np.median(recovery)
         return recovery, subcat_recovery
 
-    def loss_nll_flatten(self, S, log_probs):
+    def loss_nll_flatten(self, S, log_probs, mask: Optional[torch.Tensor] = None):
         """Negative log probabilities"""
         criterion = torch.nn.NLLLoss(reduction="none")
         loss = criterion(log_probs, S)
+        if mask is not None:
+            loss = loss[mask]
         loss_av = loss.mean()
         return loss, loss_av
 
-    def loss_nll_smoothed(self, S, log_probs, weight=0.1):
+    def loss_nll_smoothed(
+        self, S, log_probs, weight: float = 0.1, mask: Optional[torch.Tensor] = None
+    ):
         """Negative log probabilities"""
         S_onehot = torch.nn.functional.one_hot(S, num_classes=20).float()
         S_onehot = S_onehot + weight / float(S_onehot.size(-1))
@@ -234,6 +279,8 @@ class ProDesign(Base_method):
             -1, keepdim=True
         )  # [4, 463, 20]/[4, 463, 1] --> [4, 463, 20]
 
-        loss = -(S_onehot * log_probs).sum(-1).mean()
-        loss_av = torch.sum(loss)
+        loss = -(S_onehot * log_probs).sum(-1)
+        if mask is not None:
+            loss = loss[mask]
+        loss_av = torch.sum(loss.mean())
         return loss, loss_av

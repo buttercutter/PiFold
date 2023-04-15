@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -6,8 +7,8 @@ import torch.nn as nn
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
 from .common import Linear
+from .prodesign_featurizer import _full_dist, _get_features_dense, _get_features_sparse
 from .prodesign_module import *
-from .prodesign_featurizer import _full_dist, _get_features_sparse, _get_features_dense
 
 
 class ProDesign_Model(nn.Module):
@@ -102,17 +103,35 @@ class ProDesign_Model(nn.Module):
         decoding_order=None,
         return_logit=False,
         mode: str = "sparse",
+        node_mask: Optional[torch.Tensor] = None,
+        edge_mask: Optional[torch.Tensor] = None,
     ):
         if mode != "sparse":
             raise NotImplementedError("Only sparse mode is supported for now")
         t1 = time.time()
-        h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V)))
-        h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P)))
+        if mode == "sparse":
+            h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V)))
+            h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P)))
+        elif mode == "dense":
+            h_V = self.node_embedding(h_V)
+            h_P = self.edge_embedding(h_P)
+            h_V[node_mask] = self.W_v(self.norm_nodes(h_V[node_mask]))
+            h_P[edge_mask] = self.W_e(self.norm_edges(h_P[edge_mask]))
 
-        h_V, h_P = self.encoder(h_V, h_P, P_idx, batch_id)
+        h_V, h_P = self.encoder(
+            h_V,
+            h_P,
+            P_idx,
+            batch_id,
+            mode=mode,
+            node_mask=node_mask,
+            edge_mask=edge_mask,
+        )
         t2 = time.time()
 
-        log_probs, logits = self.decoder(h_V, batch_id)
+        log_probs, logits = self.decoder(
+            h_V, batch_id, mode=mode, node_mask=node_mask, edge_mask=edge_mask
+        )
 
         t3 = time.time()
 
@@ -130,22 +149,32 @@ class ProDesign_Model(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def _get_features(self, S: torch.Tensor, score: torch.Tensor, X: torch.Tensor, mask: torch.Tensor, mode: str = "sparse") -> list[torch.Tensor]:
-        """ Gets features as it needs the virtual atoms. """
-        _get_features_func = _get_features_sparse if mode == "sparse" else _get_features_dense
+    def _get_features(
+        self,
+        S: torch.Tensor,
+        score: torch.Tensor,
+        X: torch.Tensor,
+        mask: torch.Tensor,
+        mode: str = "sparse",
+    ) -> list[torch.Tensor]:
+        """Gets features as it needs the virtual atoms."""
+        _get_features_func = (
+            _get_features_sparse if mode == "sparse" else _get_features_dense
+        )
         return _get_features_func(
             S=S,
             score=score,
-            X=X, mask=mask,
+            X=X,
+            mask=mask,
             # FIXME: hypnopump@ `virtual_atoms` prevents us from moving to pure CPU setup
             virtual_atoms=self.virtual_atoms,
             top_k=self.top_k,
             num_rbf=self.num_rbf,
-            virtual_num = self.args.virtual_num,
+            virtual_num=self.args.virtual_num,
             node_dist=self.args.node_dist,
             node_angle=self.args.node_angle,
             node_direct=self.args.node_direct,
             edge_dist=self.args.edge_dist,
             edge_angle=self.args.edge_angle,
-            edge_direct=self.args.edge_direct
+            edge_direct=self.args.edge_direct,
         )
