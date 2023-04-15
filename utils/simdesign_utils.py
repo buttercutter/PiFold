@@ -205,7 +205,7 @@ def batched_index_select(values: th.Tensor, indices: th.Tensor, dim=1) -> th.Ten
     * indices: (..., k, iii) th.Tensor. iii is any number of dims
     Outputs: (..., k, iii, vvv)
     """
-    vdim = dim if dim > 0 else values.ndim + dim
+    vdim = dim if dim >= 0 else values.ndim + dim
     values_shape, indices_shape = map(lambda x: list(x.shape), (values, indices))
     extra_value_dims, extra_indices_dims = map(
         lambda x: x[vdim + 1 :], (values_shape, indices_shape)
@@ -214,14 +214,14 @@ def batched_index_select(values: th.Tensor, indices: th.Tensor, dim=1) -> th.Ten
     indices = indices[(..., *((None,) * len(extra_value_dims)))]
     # (..., n, vvv) -> (..., n, iii, vvv)
     values = values[
-        (*((slice(None),) * (dim + 1)), *((None,) * len(extra_indices_dims)), ...)
+        (*((slice(None),) * (vdim + 1)), *((None,) * len(extra_indices_dims)), ...)
     ]
     # expand to match shapes except dim
     indices = indices.expand(*((-1,) * len(indices_shape)), *extra_value_dims)
     values = values.expand(
         *(-1,) * (vdim + 1), *extra_indices_dims, *(-1,) * len(extra_value_dims)
     )
-    return values.gather(dim, indices)
+    return values.gather(vdim, indices)
 
 
 def gather_edges(edges: torch.Tensor, neighbor_idx: torch.Tensor) -> torch.Tensor:

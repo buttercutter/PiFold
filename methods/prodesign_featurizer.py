@@ -4,8 +4,9 @@ import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from functools import partial
 
-from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
+from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes, batched_index_select
 
 
 def _full_dist(
@@ -35,7 +36,7 @@ def _full_dist(
     return D_neighbors, E_idx
 
 
-def _get_features(
+def _get_features_dense(
     S: th.Tensor,
     score: th.Tensor,
     X: th.Tensor,
@@ -55,63 +56,45 @@ def _get_features(
     Inputs:
     * S: ???
     * score: ???
-    * X: (B, N, C, D) ???
-    * mask: (B, N, ...) ???
+    * X: (B, N, C=4, D) coordinates of BB atoms
+    * mask: (B, N) float mask indicating valid (present, resolved AAs)
     * top_k: int. number of neighbors to link.
     * virtual_num: int. Number of virtual atoms.
     * virtual_atoms: (virtual_num, 3) virtual atom positions.
     * num_rbf: int. Number of RBFs for distance encoding.
-    Outputs:
+    Outputs: (B, N, D) data.
     """
     device = X.device
-    mask_bool = mask.bool()
     B, N, _, _ = X.shape
-    X_ca = X[..., 1, :]
+    X_ca = X[..., 1, :]  # (B, N, D)
+    mask_bool = mask.bool()  # (B, N)
+    # (B, N, K) dists, (B, N, K) edge idx
     D_neighbors, E_idx = _full_dist(X=X_ca, mask=mask, top_k=top_k)
 
-    mask_attend = gather_nodes(mask_bool.unsqueeze(-1), E_idx).squeeze(-1)
-    mask_attend = (mask.unsqueeze(-1) * mask_attend) == 1
-    edge_mask_select = lambda x: th.masked_select(x, mask_attend[..., None]).reshape(
-        -1, x.shape[-1]
-    )
-    node_mask_select = lambda x: th.masked_select(x, mask_bool[..., None]).reshape(
-        -1, x.shape[-1]
-    )
+    # (B, N, K)
+    mask_attend = batched_index_select(mask_bool, E_idx, dim=-1)
+    mask_attend = (mask[..., None] * mask_attend).bool()
 
+    # (B, N)
     randn = th.rand(mask.shape, device=X.device).add_(5).abs()
-    decoding_order = th.argsort(
-        -mask * randn
-    )  # 我们的mask=1代表数据可用, 而protein MPP的mask=1代表数据不可用，正好相反
-    permutation_matrix_reverse = th.nn.functional.one_hot(
-        decoding_order, num_classes=N
-    ).float()
-    # 计算q已知的情况下, q->p的mask,
+    # Our mask=1 represents available data, vs the protein MPP's mask=1 which represents unavailable data
+    decoding_order = th.argsort(-mask * randn)
+    # Calc mask from q to p, given the known q
+    permutation_matrix_reverse = th.nn.functional.one_hot(decoding_order, num_classes=N).float()
     order_mask_backward = th.einsum(
         "ij, biq, bjp->bqp",
-        th.tril(th.ones(N, N, device=device)),
+        th.tril(th.ones(N, N, device=device, dtype=permutation_matrix_reverse.dtype)),
         permutation_matrix_reverse,
         permutation_matrix_reverse,
     )
     mask_attend2 = th.gather(order_mask_backward, 2, E_idx)
-    mask_1D = mask.view(mask.size(0), mask.size(1), 1)
-    mask_bw = (mask_1D * mask_attend2).unsqueeze(-1)
-    mask_fw = (mask_1D * (1 - mask_attend2)).unsqueeze(-1)
-    mask_bw = edge_mask_select(mask_bw).squeeze()
-    mask_fw = edge_mask_select(mask_fw).squeeze()
-
-    # sequence
-    S = th.masked_select(S, mask_bool)
-    if score is not None:
-        score = th.masked_select(score, mask_bool)
+    mask_1D = mask[..., None]
+    mask_bw = (mask_1D * mask_attend2)
+    mask_fw = (mask_1D * (1 - mask_attend2))
 
     # angle & direction
     V_angles = _dihedrals(X, 0)
-    V_angles = node_mask_select(V_angles)
-
     V_direct, E_direct, E_angles = _orientations_coarse_gl_tuple(X, E_idx)
-    V_direct = node_mask_select(V_direct)
-    E_direct = edge_mask_select(E_direct)
-    E_angles = edge_mask_select(E_angles)
 
     # Locate virtual atoms
     if virtual_num > 0:
@@ -133,7 +116,7 @@ def _get_features(
     row_aidxs, cols_aidxs = torch.triu_indices(
         X.shape[-2], X.shape[-2], offset=1, device=X.device
     )
-    anode_rbf = _get_rbf(X[..., None, :], X[..., None, :, :], None, num_rbf).squeeze()
+    anode_rbf = _get_rbf(X[..., None, :], X[..., None, :, :], None, num_rbf).squeeze(-2)
     V_dist = [*anode_rbf[..., row_aidxs, cols_aidxs, :].unbind(dim=-2)]
 
     if virtual_num > 0:
@@ -146,11 +129,11 @@ def _get_features(
         # (b n v d) -> (b n v v d) -> (b n triu(v v) rbf)
         vnode_rbf = _get_rbf(
             atom_vs[..., None, :], atom_vs[..., None, :, :], None, num_rbf
-        ).squeeze()
+        ).squeeze(-2)
         V_dist += [*vnode_rbf[..., row_vidxs, cols_vidxs, :].unbind(dim=-2)]
 
-    # p x (b n rbf) -> (masked(b n), (p rbf))
-    V_dist = th.cat(list(map(node_mask_select, V_dist)), dim=-1)
+    # p x (b n rbf) -> (b, n, (p rbf))
+    V_dist = th.cat(V_dist, dim=-1)
 
     # Batched Edge distance encoding
     # CA-CA, CA-C, C-CA, CA-N, N-CA, CA-O, O-CA, C-C, C-N, N-C, C-O, O-C, N-N, N-O, O-N, O-O
@@ -172,13 +155,13 @@ def _get_features(
             X_virt.shape[0], X_virt.shape[0], *(-1,) * E_idx.ndim
         )
 
-        # FIXME: hypnopump@ keep diagonal as original code but seems nonsense
+        # keep diagonal here bc (n n) is not 0
         # (v b n d) -> (v v b n n) -> (v v b n k) -> v^2 x (b n k)
         pair_rbfs = _get_rbf(X_virt[None], X_virt[:, None], E_idx_virt, num_rbf)
         E_dist += [*pair_rbfs.reshape(-1, *pair_rbfs.shape[2:]).unbind(dim=0)]
 
-    # q x (b n k rbf) -> (masked(b n k), (q rbf))
-    E_dist = th.cat(list(map(edge_mask_select, E_dist)), dim=-1)
+    # q x (b n k rbf) -> (b, n, k, (q rbf))
+    E_dist = th.cat(E_dist, dim=-1)
 
     # stack node, edge feats
     h_V = []
@@ -197,13 +180,50 @@ def _get_features(
     if edge_direct:
         h_E.append(E_direct)
 
-    _V = th.cat(h_V, dim=-1)
-    _E = th.cat(h_E, dim=-1)
+    _V = th.cat(h_V, dim=-1) # (B, N, D)
+    _E = th.cat(h_E, dim=-1) # (B, N, K, D)
+    batch_id = th.arange(X.shape[0], device=X.device)[..., None].expand_as(mask) # (B, N)
+    return X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, mask_bool, mask_attend
 
-    # edge index. mask is (b, n)
-    shift = (mask.sum(dim=1).cumsum(dim=0) - mask.sum(dim=1))[
-        ..., None, None
-    ].long()  # (b, 1, 1)
+
+def _get_features_sparse(
+    S: th.Tensor,
+    score: th.Tensor,
+    X: th.Tensor,
+    mask: th.Tensor,
+    top_k: int,
+    virtual_num: int,
+    virtual_atoms: th.Tensor,
+    num_rbf: int,
+    node_dist: bool,
+    node_angle: bool,
+    node_direct: bool,
+    edge_dist: bool,
+    edge_angle: bool,
+    edge_direct: bool,
+) -> list[th.Tensor]:
+    """Get the features for the model.
+    Inputs:
+    * S: ???
+    * score: ???
+    * X: (B, N, C=4, D) coordinates of BB atoms
+    * mask: (B, N) float mask indicating valid (present, resolved AAs)
+    * top_k: int. number of neighbors to link.
+    * virtual_num: int. Number of virtual atoms.
+    * virtual_atoms: (virtual_num, 3) virtual atom positions.
+    * num_rbf: int. Number of RBFs for distance encoding.
+    Outputs: (mask(B N), ...) for node data and (mask(B N K), ...) for edge data
+    """
+    X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, node_mask, edge_mask = _get_features_dense(
+        S, score, X, mask, top_k, virtual_num, virtual_atoms, num_rbf,
+        node_dist, node_angle, node_direct, edge_dist, edge_angle, edge_direct
+    )
+    mask_bool, mask_attend = node_mask, edge_mask
+    B, N = mask_bool.shape
+
+    # Get edge idxs
+    # (b, n) -> (b, 1, 1), (b n k) -> ... -> (2, (b n k)) + offsets
+    shift = (mask.sum(dim=1).cumsum(dim=0) - mask.sum(dim=1))[..., None, None].long()
     src = shift + E_idx
     src = th.masked_select(src, mask_attend).view(1, -1)
     dst = shift + th.arange(0, N, device=src.device)[None, :, None].expand_as(
@@ -212,13 +232,9 @@ def _get_features(
     dst = th.masked_select(dst, mask_attend).view(1, -1)
     E_idx = th.cat((dst, src), dim=0).long()
 
-    decoding_order = node_mask_select(
-        (decoding_order + shift.view(-1, 1)).unsqueeze(-1)
-    )
-    decoding_order = decoding_order.squeeze().long()
+    # (b n ...) -> (mask(b n) ...)
+    X, S, score, _V, batch_id, decoding_order = map(lambda x: x[mask_bool], (X, S, score, _V, batch_id, decoding_order))
+    # (b n k ...) -> (mask(b n k) ...) for edges
+    _E2, mask_bw, mask_fw = map(lambda x: x[mask_attend], (_E, mask_bw, mask_fw))
 
-    # 3D point, (B, N, C, 3) -> (masked(B N), C, 3)
-    batch_id, chainlen_id = mask.nonzero().transpose(-1, -2)  # index of non-zero values
-    X = X[batch_id, chainlen_id]
-
-    return X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order
+    return X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, mask_bool, mask_attend

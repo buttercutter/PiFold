@@ -7,7 +7,7 @@ from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_no
 
 from .common import Linear
 from .prodesign_module import *
-from .prodesign_featurizer import _full_dist, _get_features
+from .prodesign_featurizer import _full_dist, _get_features_sparse, _get_features_dense
 
 
 class ProDesign_Model(nn.Module):
@@ -101,7 +101,10 @@ class ProDesign_Model(nn.Module):
         mask_fw=None,
         decoding_order=None,
         return_logit=False,
+        mode: str = "sparse",
     ):
+        if mode != "sparse":
+            raise NotImplementedError("Only sparse mode is supported for now")
         t1 = time.time()
         h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V)))
         h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P)))
@@ -127,9 +130,10 @@ class ProDesign_Model(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def _get_features(self, S: torch.Tensor, score: torch.Tensor, X: torch.Tensor, mask: torch.Tensor) -> list[torch.Tensor]:
+    def _get_features(self, S: torch.Tensor, score: torch.Tensor, X: torch.Tensor, mask: torch.Tensor, mode: str = "sparse") -> list[torch.Tensor]:
         """ Gets features as it needs the virtual atoms. """
-        return _get_features(
+        _get_features_func = _get_features_sparse if mode == "sparse" else _get_features_dense
+        return _get_features_func(
             S=S,
             score=score,
             X=X, mask=mask,

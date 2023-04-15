@@ -62,6 +62,14 @@ def create_parser():
         type=int,
         help="test every epoch or just on new best model",
     )
+    parser.add_argument(
+        "--train_mode", default="sparse", type=str, options=["sparse", "dense"],
+        help=(
+            "sparse training (fuse batch dims into one example, index edges and scttered reductions)"
+            "or dense (keeps batches, masks)."
+            "Dense uses more compute, its faster. Sparse use more memacess, its slower."
+        )
+    )
 
     # ProDesign parameters
     parser.add_argument("--updating_edges", default=4, type=int)

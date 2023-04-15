@@ -43,8 +43,10 @@ class ProDesign(Base_method):
                 mask_bw,
                 mask_fw,
                 decoding_order,
-            ) = self.model._get_features(S, score, X=X, mask=mask)
-            log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                node_mask,
+                edge_mask,
+            ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
+            log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
             loss = self.criterion(log_probs, S)
             loss.backward()
             # TODO: hypnopump@ consider clipping gradients on a per-sample basis instead of per-batch. How ??? idk yet
@@ -88,8 +90,8 @@ class ProDesign(Base_method):
                     mask_bw,
                     mask_fw,
                     decoding_order,
-                ) = self.model._get_features(S, score, X=X, mask=mask)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
+                log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
                 loss = self.criterion(log_probs, S)
 
                 if isinstance(valid_sum, int):
@@ -129,6 +131,8 @@ class ProDesign(Base_method):
                     mask_bw,
                     mask_fw,
                     decoding_order,
+                    node_mask,
+                    edge_mask,
                 ) = self.model._get_features(S, score, X=X, mask=mask)
                 log_probs = self.model(h_V, h_E, E_idx, batch_id)
                 loss, loss_av = self.loss_nll_flatten(S, log_probs)
@@ -183,8 +187,10 @@ class ProDesign(Base_method):
                     mask_bw,
                     mask_fw,
                     decoding_order,
-                ) = self.model._get_features(S, score, X=X, mask=mask)
-                log_probs = self.model(h_V, h_E, E_idx, batch_id)
+                    node_mask,
+                    edge_mask,
+                ) = self.model._get_features(S, score, X=X, mask=mask, mode=args.train_mode)
+                log_probs = self.model(h_V, h_E, E_idx, batch_id, mode=args.train_mode)
                 S_pred = torch.argmax(log_probs, dim=1)
                 cmp = S_pred == S
                 recovery_ = cmp.float().mean().cpu().numpy()
