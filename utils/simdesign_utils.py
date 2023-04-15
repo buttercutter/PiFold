@@ -1,11 +1,11 @@
 from collections.abc import Mapping, Sequence
+from functools import partial
+from typing import Optional
 
 import numpy as np
 import torch
 import torch as th
 import torch.nn.functional as F
-from functools import partial
-from typing import Optional
 
 """
 Notation:
@@ -20,7 +20,15 @@ Notation:
 """
 
 
-safe_cdist = partial(th.cdist, compute_mode="donot_use_mm_for_euclid_dist")
+def safe_cdist(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """Manual op is faster on CUDA than torch.cdist (no matmul as numerical precision issues).
+    (but not in ARM CPU, where cpu kernel is faster).
+    """
+    if not X.is_cuda:
+        return th.cdist(X, Y, compute_mode="donot_use_mm_for_euclid_dist")
+    return th.sqrt(
+        th.sum((X[..., None, :] - Y[..., None, :, :]).square(), dim=-1).add_(eps)
+    )
 
 
 # Thanks for StructTrans
@@ -81,7 +89,6 @@ def _get_rbf(
     """(B, L1, D), (D, L2, D) -> (B, L1, L2, num_rbf)
     Optionally supports edges in the form of (B, L1, K) -> (B, L1, K, num_rbf)
     """
-
     if E_idx is not None:
         D_A_B = safe_cdist(A, B)  # [B, L1, L2]
         D_A_B = batched_index_select(D_A_B, E_idx, dim=-1)  # [B, L1, K]
