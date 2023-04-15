@@ -3,12 +3,59 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
 from .common import Linear
 from .prodesign_featurizer import _full_dist, _get_features_dense, _get_features_sparse
 from .prodesign_module import *
+import logging
+from torch_geometric.nn.norm.layer_norm import sparseLayerNorm
+
+
+logger = logging.getLogger(__name__)
+
+
+class NormWrapper(nn.Module):
+    def __init__(self, *args, norm_choice: str, **kwargs):
+        """ Wraps different norm choices and considerations.
+        Inputs:
+        * norm_choice: str. One of ["batchnorm", "layernorm", "none"]
+        """
+        super().__init__()
+        self.norm_choice = norm_choice
+
+        self.norm = nn.Identity()
+        if norm_choice == "batchnorm":
+            self.norm = nn.BatchNorm1d(*args, **kwargs)
+        elif norm_choice == "layernorm":
+            self.norm = sparseLayerNorm(*args, **kwargs)
+        else:
+            logger.warning(f"Coyld not recognize norm choice {norm_choice}. Setting Identity")
+
+    def forward(self, x: th.Tensor, mask: Optional[th.Tensor] = None, batch_index: Optional[th.Tensor] = None, mode: str = "sparse") -> th.Tensor:
+        """ Runs norm of choice dealing with custom needs for aggregation / masking.
+        Inputs:
+        * x: th.Tensor. Input features. As in any norm layer.
+        * mask: th.Tensor. Mask of valid nodes. Needed for batchnorm in dense mode.
+        """
+        if self.norm_choice == "batchnorm":
+            if mode == "dense":
+                assert mask is not None, f"Dense implementation of {self.norm_choice} requires a mask."
+                x_ = x_.clone()
+                x_[mask] = self.norm(x_[mask])
+                return x_
+
+        if self.norm_choice == "layernorm":
+            if mode == "sparse":
+                assert batch_index is not None, f"Sparse implementation of {self.norm_choice} requires a batch index."
+                return self.norm(x, batch_index)
+            else:
+                return F.layer_norm(x, [*x.shape[-1:]], self.norm.weight, self.norm.bias, self.norm.eps)
+
+        return self.norm(x)
+
 
 
 class ProDesign_Model(nn.Module):
@@ -24,6 +71,7 @@ class ProDesign_Model(nn.Module):
         self.top_k = args.k_neighbors
         self.num_rbf = 16
         self.num_positional_embeddings = 16
+        self.norm_class = partial(NormWrapper, args.norm_choice)
 
         # prior_matrix = [
         #     [-0.58273431, 0.56802827, -0.54067466],
@@ -62,17 +110,17 @@ class ProDesign_Model(nn.Module):
 
         self.node_embedding = Linear(node_in, node_features, bias=True)
         self.edge_embedding = Linear(edge_in, edge_features, bias=True)
-        self.norm_nodes = nn.BatchNorm1d(node_features)
-        self.norm_edges = nn.BatchNorm1d(edge_features)
+        self.norm_nodes = self.norm_class(node_features)
+        self.norm_edges = self.norm_class(edge_features)
 
         # TODO: hypnopump@ consider LayerNorm (if dense) or OnlineNorm ???
         self.W_v = nn.Sequential(
             Linear(node_features, hidden_dim, bias=True, init="relu"),
             nn.GELU(),
-            nn.BatchNorm1d(hidden_dim),
+            self.norm_class(hidden_dim),
             Linear(hidden_dim, hidden_dim, bias=True, init="relu"),
             nn.GELU(),
-            nn.BatchNorm1d(hidden_dim),
+            self.norm_class(hidden_dim),
             Linear(hidden_dim, hidden_dim, bias=True),
         )
 
@@ -81,10 +129,10 @@ class ProDesign_Model(nn.Module):
         self.W_f = Linear(edge_features, hidden_dim, bias=True)
 
         self.encoder = StructureEncoder(
-            hidden_dim, num_encoder_layers, dropout, checkpoint=args.checkpoint
+            hidden_dim, num_encoder_layers, dropout, checkpoint=args.checkpoint, norm_class=self.norm_class
         )
 
-        self.decoder = MLPDecoder(hidden_dim)
+        self.decoder = MLPDecoder(hidden_dim, norm_class=self.norm_class)
         self._init_params()
 
         self.encode_t = 0
@@ -109,14 +157,9 @@ class ProDesign_Model(nn.Module):
         if mode != "sparse":
             raise NotImplementedError("Only sparse mode is supported for now")
         t1 = time.time()
-        if mode == "sparse":
-            h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V)))
-            h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P)))
-        elif mode == "dense":
-            h_V = self.node_embedding(h_V)
-            h_P = self.edge_embedding(h_P)
-            h_V[node_mask] = self.W_v(self.norm_nodes(h_V[node_mask]))
-            h_P[edge_mask] = self.W_e(self.norm_edges(h_P[edge_mask]))
+
+        h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V), batch_index=batch_id, mask=node_mask))
+        h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P), batch_index=batch_id[P_idx[0]], mask=edge_mask))
 
         h_V, h_P = self.encoder(
             h_V,

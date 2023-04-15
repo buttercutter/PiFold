@@ -29,11 +29,10 @@ def get_attend_mask(idx: th.Tensor, mask: th.Tensor) -> th.Tensor:
     -------
     mask_attend: th.Tensor shape: ???
     """
-    # TODO: write comments in english
-    mask_attend = gather_nodes(mask.unsqueeze(-1), idx).squeeze(
-        -1
-    )  # 一阶邻居节点的mask: 1代表节点存在, 0代表节点不存在
-    mask_attend = mask.unsqueeze(-1) * mask_attend  # 自身的mask*邻居节点的mask
+    # Mask of first-order neighboring nodes: 1 indicates the node exists, 0 indicates the node does not exist.
+    mask_attend = gather_nodes(mask.unsqueeze(-1), idx).squeeze(-1)
+    # The mask of self * the mask of neighboring nodes
+    mask_attend = mask.unsqueeze(-1) * mask_attend
     return mask_attend
 
 
@@ -70,7 +69,7 @@ class NeighborAttention(nn.Module):
         center_id: th.Tensor,
         batch_id: th.Tensor,
         dst_idx: Optional[th.Tensor] = None,
-    ):
+    ) -> th.Tensor:
         N = h_V.shape[0]
         E = h_E.shape[0]
         n_heads = self.num_heads
@@ -98,28 +97,34 @@ class NeighborAttention(nn.Module):
 
 #################################### edge modules ###############################
 class EdgeMLP(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30, norm_class: nn.Module=nn.BatchNorm1d):
         super(EdgeMLP, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
         self.dropout = nn.Dropout(dropout)
-        self.norm = nn.BatchNorm1d(num_hidden)
+        self.norm = norm_class(num_hidden)
         # TODO: hypnopump@: if not loading published models, turn into MLP ???
         self.W11 = Linear(num_hidden + num_in, num_hidden, bias=True, init="relu")
         self.W12 = Linear(num_hidden, num_hidden, bias=True, init="relu")
         self.W13 = Linear(num_hidden, num_hidden, bias=True, init="final")
         self.act = torch.nn.GELU()
 
-    def forward(self, h_V, h_E, edge_idx, batch_id):
-        src_idx, dst_idx = edge_idx
+    def forward(self, h_V, h_E, edge_idx, batch_id: th.Tensor,
+        node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse"
+    ) -> th.Tensor :
+        if mode == "dense":
+            raise NotImplementedError
 
-        # (N, d1), (E, d2), (N, d1) -> (E, d1+d2+d1)
-        h_EV = torch.cat([h_V[src_idx], h_E, h_V[dst_idx]], dim=-1)
+        elif mode == "sparse":
+            # (N, d1), (E, d2), (N, d1) -> (E, d1+d2+d1)
+            src_idx, dst_idx = edge_idx
+            h_EV = torch.cat([h_V[src_idx], h_E, h_V[dst_idx]], dim=-1)
+
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         # TODO: hypnopump@: if inference and memory consumption is a problem, use inplace operation
         # TODO: hypnopump@: clarify reisudal better ??? either inside-block or outside-block, not mixed
-        h_E = self.norm(h_E + self.dropout(h_message))
+        h_E = self.norm(h_E + self.dropout(h_message), batch_index=bacth_id[edge_idx[0]], mask=edge_mask, mode=mode)
         return h_E
 
 
@@ -168,7 +173,11 @@ class Context(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, h_V, h_E, edge_idx, batch_id):
+    def forward(self, h_V, h_E, edge_idx, batch_id: th.Tensor, node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse") -> tuple[th.Tensor, th.Tensor]:
+        if mode == "dense":
+            raise NotImplementedError
+
+
         if self.node_context:
             c_V = scatter_mean(h_V, batch_id, dim=0)
             h_V = h_V * self.V_MLP_g(c_V[batch_id])
@@ -195,13 +204,14 @@ class GeneralGNN(nn.Module):
         edge_net="EdgeMLP",
         node_context=0,
         edge_context=0,
+        norm_class: nn.Module = nn.BatchNorm1d,
     ):
         super(GeneralGNN, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
         self.dropout = nn.Dropout(dropout)
-        self.norm = nn.ModuleList([nn.BatchNorm1d(num_hidden) for _ in range(3)])
+        self.norm = nn.ModuleList([norm_class(num_hidden) for _ in range(2)])
         self.node_net = node_net
         self.edge_net = edge_net
         if node_net == "AttMLP":
@@ -231,32 +241,47 @@ class GeneralGNN(nn.Module):
         self.act = torch.nn.GELU()
 
     def forward(
-        self, h_V: th.Tensor, h_E: th.Tensor, edge_idx: th.Tensor, batch_id: th.Tensor
+        self,
+        h_V: th.Tensor, h_E: th.Tensor,
+        edge_idx: Optional[th.Tensor] = None,
+        batch_id: Optional[th.Tensor] = None,
+        node_mask: Optional[th.Tensor] = None,
+        edge_mask: Optional[th.Tensor] = None
+        mode: str = "sparse",
     ) -> tuple[th.Tensor, th.Tensor]:
-        """Inputs:
+        """ Implements the `sparse` forward. See `self.dense_forward` for dense.
+        Inputs:
         * h_V: (N, d1), node features
         * h_E: (E, d2), edge features
         * edge_idx: (2, E), edge indices
         * batch_id: (N), node batch ids
+        * mode: "sparse" or "dense"
+        * node_mask: (B, N), node mask. only required for dense mode
+        * edge_mask: (B, N, K), edge mask. only required for dense mode
         """
-        src_idx, dst_idx = edge_idx
+        # sparse method
+        if mode == "dense":
+            raise NotImplementedError
+        if mode == "sparse":
+            src_idx, dst_idx = edge_idx
 
-        if self.node_net == "AttMLP" or self.node_net == "QKV":
-            dh = self.attention(
-                h_V, torch.cat([h_E, h_V[dst_idx]], dim=-1), src_idx, batch_id, dst_idx
-            )
-        else:
-            dh = self.attention(h_V, h_E, src_idx, batch_id, dst_idx)
-        h_V = self.norm[0](h_V + self.dropout(dh))
+            if self.node_net == "AttMLP" or self.node_net == "QKV":
+                dh = self.attention(
+                    h_V, torch.cat([h_E, h_V[dst_idx]], dim=-1), src_idx, batch_id, dst_idx
+                )
+            else:
+                dh = self.attention(h_V, h_E, src_idx, batch_id, dst_idx)
+
+        h_V = self.norm[0](h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask, mode=mode)
         dh = self.dense(h_V)
-        h_V = self.norm[1](h_V + self.dropout(dh))
+        h_V = self.norm[1](h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask, mode=mode)
 
         if self.edge_net == "None":
             pass
         else:
-            h_E = self.edge_update(h_V, h_E, edge_idx, batch_id)
+            h_E = self.edge_update(h_V, h_E, edge_idx, batch_id, node_mask=node_mask, edge_mask=edge_mask, mode=mode)
 
-        h_V, h_E = self.context(h_V, h_E, edge_idx, batch_id)
+        h_V, h_E = self.context(h_V, h_E, edge_idx, batch_id, node_mask=node_mask, edge_mask=edge_mask, mode=mode)
         return h_V, h_E
 
 
@@ -271,6 +296,7 @@ class StructureEncoder(nn.Module):
         node_context: bool = True,
         edge_context: bool = False,
         checkpoint: bool = False,
+        norm_class: nn.Module = nn.BatchNorm1d,
     ):
         """Graph labeling network"""
         super(StructureEncoder, self).__init__()
@@ -288,26 +314,33 @@ class StructureEncoder(nn.Module):
                     edge_net=edge_net,
                     node_context=node_context,
                     edge_context=edge_context,
+                    norm_class=norm_class,
                 ),
             )
 
         self.encoder_layers = nn.Sequential(*encoder_layers)
 
-    def forward(self, h_V, h_P, P_idx, batch_id):
+    def forward(self, h_V, h_P, P_idx, batch_id, node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse"):
+        """ Inputs:
+        ...
+        * mode: str, "sparse" or "dense"
+        * node_mask: (B, N), node mask. required if mode == "dense"
+        * edge_mask: (B, E), edge mask. required if mode == "dense"
+        """
         for layer in self.encoder_layers:
             if self.checkpoint:
-                h_V, h_P = checkpoint.checkpoint(layer, h_V, h_P, P_idx, batch_id)
+                h_V, h_P = checkpoint.checkpoint(layer, h_V, h_P, P_idx, batch_id, node_mask=self.node_mask, edge_mask=self.edge_mask, mode=self.mode)
             else:
-                h_V, h_P = layer(h_V, h_P, P_idx, batch_id)
+                h_V, h_P = layer(h_V, h_P, P_idx, batch_id, node_mask=self.node_mask, edge_mask=self.edge_mask, mode=self.mode)
         return h_V, h_P
 
 
 class MLPDecoder(nn.Module):
-    def __init__(self, hidden_dim, vocab=20):
+    def __init__(self, hidden_dim, vocab: int=20, norm_class: nn.Module = nn.BatchNorm1d):
         super().__init__()
         self.readout = Linear(hidden_dim, vocab, init="final")
 
-    def forward(self, h_V, batch_id=None):
+    def forward(self, h_V: th.Tensor, batch_id: Optional[th.Tensor]=None, node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse") -> tuple[th.Tensor, th.Tensor]:
         logits = self.readout(h_V)
         log_probs = F.log_softmax(logits, dim=-1)
         return log_probs, logits

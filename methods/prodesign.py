@@ -58,10 +58,14 @@ class ProDesign(Base_method):
                 node_mask=node_mask,
                 edge_mask=edge_mask,
             )
-            loss = self.criterion(log_probs, S)
-            if self.args.train_mode == "dense":
-                # in this case loss is not reduced, and of shape (B, N, ...)
-                loss = loss[node_mask].mean()
+            if self.args.train_mode == "sparse":
+                # (batch length)-level reduction
+                loss = self.criterion(log_probs, S).mean()
+            elif self.args.train_mode == "dense":
+                # length-level masking + batch level reduction
+                loss = self.criterion(log_probs, S)[node_mask].mean()
+            else:
+                raise NotImplementedError("Only sparse and dense modes are supported for now")
 
             loss.backward()
             # TODO: hypnopump@ consider clipping gradients on a per-sample basis instead of per-batch. How ??? idk yet
@@ -121,6 +125,16 @@ class ProDesign(Base_method):
                 )
                 loss = self.criterion(log_probs, S)
 
+                if self.args.train_mode == "sparse":
+                    # (batch length)-level reduction
+                    loss = self.criterion(log_probs, S).mean()
+                elif self.args.train_mode == "dense":
+                    # length-level masking + batch level reduction
+                    loss = self.criterion(log_probs, S)[node_mask].mean()
+                else:
+                    raise NotImplementedError("Only sparse and dense modes are supported for now")
+
+                # FIXME: hypnopump@ simplify
                 if isinstance(valid_sum, int):
                     valid_sum = torch.sum(loss * mask)
                     valid_weights = torch.sum(mask)
@@ -172,8 +186,9 @@ class ProDesign(Base_method):
                     node_mask=node_mask,
                     edge_mask=edge_mask,
                 )
-                loss, loss_av = self.loss_nll_flatten(S, log_probs)
-                # TODO: hypnopump@ wtf ???
+                loss_mask = node_mask if self.args.train_mode == "dense" else None
+                loss, loss_av = self.loss_nll_flatten(S, log_probs, mask=loss_mask)
+                # FIXME: hypnopump@ wtf ???
                 mask = torch.ones_like(loss)
 
                 if isinstance(test_sum, int):
@@ -199,6 +214,7 @@ class ProDesign(Base_method):
         return test_perplexity, test_recovery, test_subcat_recovery
 
     def _cal_recovery(self, dataset, featurizer):
+        """ This part runs the sparse encoding for now. """
         self.residue_type_cmp = torch.zeros(20, device="cuda:0")
         self.residue_type_num = torch.zeros(20, device="cuda:0")
         recovery = []
@@ -227,10 +243,10 @@ class ProDesign(Base_method):
                     node_mask,
                     edge_mask,
                 ) = self.model._get_features(
-                    S, score, X=X, mask=mask, mode=self.args.train_mode
+                    S, score, X=X, mask=mask, mode="sparse",
                 )
                 log_probs = self.model(
-                    h_V, h_E, E_idx, batch_id, mode=self.args.train_mode
+                    h_V, h_E, E_idx, batch_id, mode="sparse",
                 )
                 S_pred = torch.argmax(log_probs, dim=1)
                 cmp = S_pred == S
