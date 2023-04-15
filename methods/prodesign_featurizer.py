@@ -1,12 +1,18 @@
 import time
+from functools import partial
 
 import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
 
-from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes, batched_index_select
+from utils import (
+    _dihedrals,
+    _get_rbf,
+    _orientations_coarse_gl_tuple,
+    batched_index_select,
+    gather_nodes,
+)
 
 
 def _full_dist(
@@ -81,7 +87,9 @@ def _get_features_dense(
     # Our mask=1 represents available data, vs the protein MPP's mask=1 which represents unavailable data
     decoding_order = th.argsort(-mask * randn)
     # Calc mask from q to p, given the known q
-    permutation_matrix_reverse = th.nn.functional.one_hot(decoding_order, num_classes=N).float()
+    permutation_matrix_reverse = th.nn.functional.one_hot(
+        decoding_order, num_classes=N
+    ).float()
     order_mask_backward = th.einsum(
         "ij, biq, bjp->bqp",
         th.tril(th.ones(N, N, device=device, dtype=permutation_matrix_reverse.dtype)),
@@ -90,8 +98,8 @@ def _get_features_dense(
     )
     mask_attend2 = th.gather(order_mask_backward, 2, E_idx)
     mask_1D = mask[..., None]
-    mask_bw = (mask_1D * mask_attend2)
-    mask_fw = (mask_1D * (1 - mask_attend2))
+    mask_bw = mask_1D * mask_attend2
+    mask_fw = mask_1D * (1 - mask_attend2)
 
     # angle & direction
     V_angles = _dihedrals(X, 0)
@@ -181,10 +189,25 @@ def _get_features_dense(
     if edge_direct:
         h_E.append(E_direct)
 
-    _V = th.cat(h_V, dim=-1) # (B, N, D)
-    _E = th.cat(h_E, dim=-1) # (B, N, K, D)
-    batch_id = th.arange(X.shape[0], device=X.device)[..., None].expand_as(mask) # (B, N)
-    return X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, mask_bool, mask_attend
+    _V = th.cat(h_V, dim=-1)  # (B, N, D)
+    _E = th.cat(h_E, dim=-1)  # (B, N, K, D)
+    batch_id = th.arange(X.shape[0], device=X.device)[..., None].expand_as(
+        mask
+    )  # (B, N)
+    return (
+        X,
+        S,
+        score,
+        _V,
+        _E,
+        E_idx,
+        batch_id,
+        mask_bw,
+        mask_fw,
+        decoding_order,
+        mask_bool,
+        mask_attend,
+    )
 
 
 def _get_features_sparse(
@@ -218,9 +241,34 @@ def _get_features_sparse(
     * num_rbf: int. Number of RBFs for distance encoding.
     Outputs: (mask(B N), ...) for node data and (mask(B N K), ...) for edge data
     """
-    X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, node_mask, edge_mask = _get_features_dense(
-        S, score, X, mask, top_k, virtual_num, virtual_atoms, num_rbf,
-        node_dist, node_angle, node_direct, edge_dist, edge_angle, edge_direct
+    (
+        X,
+        S,
+        score,
+        _V,
+        _E,
+        E_idx,
+        batch_id,
+        mask_bw,
+        mask_fw,
+        decoding_order,
+        node_mask,
+        edge_mask,
+    ) = _get_features_dense(
+        S,
+        score,
+        X,
+        mask,
+        top_k,
+        virtual_num,
+        virtual_atoms,
+        num_rbf,
+        node_dist,
+        node_angle,
+        node_direct,
+        edge_dist,
+        edge_angle,
+        edge_direct,
     )
     mask_bool, mask_attend = node_mask, edge_mask
     B, N = mask_bool.shape
@@ -237,8 +285,23 @@ def _get_features_sparse(
     E_idx = th.cat((dst, src), dim=0).long()
 
     # (b n ...) -> (mask(b n) ...)
-    X, S, score, _V, batch_id, decoding_order = map(lambda x: x[mask_bool], (X, S, score, _V, batch_id, decoding_order))
+    X, S, score, _V, batch_id, decoding_order = map(
+        lambda x: x[mask_bool], (X, S, score, _V, batch_id, decoding_order)
+    )
     # (b n k ...) -> (mask(b n k) ...) for edges
-    _E2, mask_bw, mask_fw = map(lambda x: x[mask_attend], (_E, mask_bw, mask_fw))
+    _E, mask_bw, mask_fw = map(lambda x: x[mask_attend], (_E, mask_bw, mask_fw))
 
-    return X, S, score, _V, _E, E_idx, batch_id, mask_bw, mask_fw, decoding_order, mask_bool, mask_attend
+    return (
+        X,
+        S,
+        score,
+        _V,
+        _E,
+        E_idx,
+        batch_id,
+        mask_bw,
+        mask_fw,
+        decoding_order,
+        mask_bool,
+        mask_attend,
+    )

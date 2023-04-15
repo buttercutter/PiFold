@@ -1,25 +1,25 @@
+import logging
 import time
+from functools import partial
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn.norm.layer_norm import LayerNorm as sparseLayerNorm
 
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
 from .common import Linear
 from .prodesign_featurizer import _full_dist, _get_features_dense, _get_features_sparse
 from .prodesign_module import *
-import logging
-from torch_geometric.nn.norm.layer_norm import sparseLayerNorm
-
 
 logger = logging.getLogger(__name__)
 
 
 class NormWrapper(nn.Module):
     def __init__(self, *args, norm_choice: str, **kwargs):
-        """ Wraps different norm choices and considerations.
+        """Wraps different norm choices and considerations.
         Inputs:
         * norm_choice: str. One of ["batchnorm", "layernorm", "none"]
         """
@@ -32,30 +32,43 @@ class NormWrapper(nn.Module):
         elif norm_choice == "layernorm":
             self.norm = sparseLayerNorm(*args, **kwargs)
         else:
-            logger.warning(f"Coyld not recognize norm choice {norm_choice}. Setting Identity")
+            logger.warning(
+                f"Coyld not recognize norm choice {norm_choice}. Setting Identity"
+            )
 
-    def forward(self, x: th.Tensor, mask: Optional[th.Tensor] = None, batch_index: Optional[th.Tensor] = None, mode: str = "sparse") -> th.Tensor:
-        """ Runs norm of choice dealing with custom needs for aggregation / masking.
+    def forward(
+        self,
+        x: th.Tensor,
+        mask: Optional[th.Tensor] = None,
+        batch_index: Optional[th.Tensor] = None,
+        mode: str = "sparse",
+    ) -> th.Tensor:
+        """Runs norm of choice dealing with custom needs for aggregation / masking.
         Inputs:
         * x: th.Tensor. Input features. As in any norm layer.
         * mask: th.Tensor. Mask of valid nodes. Needed for batchnorm in dense mode.
         """
         if self.norm_choice == "batchnorm":
             if mode == "dense":
-                assert mask is not None, f"Dense implementation of {self.norm_choice} requires a mask."
-                x_ = x_.clone()
+                assert (
+                    mask is not None
+                ), f"Dense implementation of {self.norm_choice} requires a mask."
+                x_ = x.clone()
                 x_[mask] = self.norm(x_[mask])
                 return x_
 
-        if self.norm_choice == "layernorm":
+        elif self.norm_choice == "layernorm":
             if mode == "sparse":
-                assert batch_index is not None, f"Sparse implementation of {self.norm_choice} requires a batch index."
+                assert (
+                    batch_index is not None
+                ), f"Sparse implementation of {self.norm_choice} requires a batch index."
                 return self.norm(x, batch_index)
             else:
-                return F.layer_norm(x, [*x.shape[-1:]], self.norm.weight, self.norm.bias, self.norm.eps)
+                return F.layer_norm(
+                    x, [*x.shape[-1:]], self.norm.weight, self.norm.bias, self.norm.eps
+                )
 
         return self.norm(x)
-
 
 
 class ProDesign_Model(nn.Module):
@@ -71,7 +84,7 @@ class ProDesign_Model(nn.Module):
         self.top_k = args.k_neighbors
         self.num_rbf = 16
         self.num_positional_embeddings = 16
-        self.norm_class = partial(NormWrapper, args.norm_choice)
+        self.norm_class = partial(NormWrapper, norm_choice=args.norm_choice)
 
         # prior_matrix = [
         #     [-0.58273431, 0.56802827, -0.54067466],
@@ -114,14 +127,15 @@ class ProDesign_Model(nn.Module):
         self.norm_edges = self.norm_class(edge_features)
 
         # TODO: hypnopump@ consider LayerNorm (if dense) or OnlineNorm ???
-        self.W_v = nn.Sequential(
-            Linear(node_features, hidden_dim, bias=True, init="relu"),
-            nn.GELU(),
-            self.norm_class(hidden_dim),
-            Linear(hidden_dim, hidden_dim, bias=True, init="relu"),
-            nn.GELU(),
-            self.norm_class(hidden_dim),
-            Linear(hidden_dim, hidden_dim, bias=True),
+        self.W_v_act = nn.GELU()
+        self.W_v_norm1 = self.norm_class(hidden_dim)
+        self.W_v_norm2 = self.norm_class(hidden_dim)
+        self.W_v = nn.ModuleList(
+            [
+                Linear(node_features, hidden_dim, bias=True, init="relu"),
+                Linear(node_features, hidden_dim, bias=True, init="relu"),
+                Linear(node_features, hidden_dim, bias=True),
+            ]
         )
 
         self.W_e = Linear(edge_features, hidden_dim, bias=True)
@@ -129,7 +143,12 @@ class ProDesign_Model(nn.Module):
         self.W_f = Linear(edge_features, hidden_dim, bias=True)
 
         self.encoder = StructureEncoder(
-            hidden_dim, num_encoder_layers, dropout, checkpoint=args.checkpoint, norm_class=self.norm_class
+            hidden_dim,
+            num_encoder_layers,
+            dropout,
+            num_heads=args.num_heads,
+            checkpoint=args.checkpoint,
+            norm_class=self.norm_class,
         )
 
         self.decoder = MLPDecoder(hidden_dim, norm_class=self.norm_class)
@@ -154,12 +173,30 @@ class ProDesign_Model(nn.Module):
         node_mask: Optional[torch.Tensor] = None,
         edge_mask: Optional[torch.Tensor] = None,
     ):
-        if mode != "sparse":
-            raise NotImplementedError("Only sparse mode is supported for now")
         t1 = time.time()
-
-        h_V = self.W_v(self.norm_nodes(self.node_embedding(h_V), batch_index=batch_id, mask=node_mask))
-        h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P), batch_index=batch_id[P_idx[0]], mask=edge_mask))
+        # node and edge embeddings
+        h_V = self.norm_nodes(
+            self.node_embedding(h_V), batch_index=batch_id, mask=node_mask, mode=mode
+        )
+        h_V = self.W_v_norm1(
+            self.W_v_act(self.W_v[0](h_V)),
+            batch_index=batch_id,
+            mask=node_mask,
+            mode=mode,
+        )
+        h_V = self.W_v_norm2(
+            self.W_v_act(self.W_v[1](h_V)),
+            batch_index=batch_id,
+            mask=node_mask,
+            mode=mode,
+        )
+        h_V = self.W_v[2](h_V)
+        e_b_idx = batch_id[P_idx[0]] if mode == "sparse" else batch_id
+        h_P = self.W_e(
+            self.norm_edges(
+                self.edge_embedding(h_P), batch_index=e_b_idx, mask=edge_mask, mode=mode
+            )
+        )
 
         h_V, h_P = self.encoder(
             h_V,

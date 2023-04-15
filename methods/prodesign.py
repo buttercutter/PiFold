@@ -16,7 +16,7 @@ class ProDesign(Base_method):
     def __init__(self, args, device, steps_per_epoch):
         Base_method.__init__(self, args, device, steps_per_epoch)
         self.model = self._build_model()
-        self.criterion = nn.CrossEntropyLoss(reduction="none")
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer, self.scheduler = self._init_optimizer(steps_per_epoch)
         self.transfer_func = lambda x: x
         if self.args.use_gpu:
@@ -59,13 +59,13 @@ class ProDesign(Base_method):
                 edge_mask=edge_mask,
             )
             if self.args.train_mode == "sparse":
-                # (batch length)-level reduction
-                loss = self.criterion(log_probs, S).mean()
+                loss = self.criterion(log_probs, S)
             elif self.args.train_mode == "dense":
-                # length-level masking + batch level reduction
-                loss = self.criterion(log_probs, S)[node_mask].mean()
+                loss = self.criterion(log_probs[node_mask], S[node_mask])
             else:
-                raise NotImplementedError("Only sparse and dense modes are supported for now")
+                raise NotImplementedError(
+                    "Only sparse and dense modes are supported for now"
+                )
 
             loss.backward()
             # TODO: hypnopump@ consider clipping gradients on a per-sample basis instead of per-batch. How ??? idk yet
@@ -123,16 +123,14 @@ class ProDesign(Base_method):
                     node_mask=node_mask,
                     edge_mask=edge_mask,
                 )
-                loss = self.criterion(log_probs, S)
-
                 if self.args.train_mode == "sparse":
-                    # (batch length)-level reduction
-                    loss = self.criterion(log_probs, S).mean()
+                    loss = self.criterion(log_probs, S)
                 elif self.args.train_mode == "dense":
-                    # length-level masking + batch level reduction
-                    loss = self.criterion(log_probs, S)[node_mask].mean()
+                    loss = self.criterion(log_probs[node_mask], S[node_mask])
                 else:
-                    raise NotImplementedError("Only sparse and dense modes are supported for now")
+                    raise NotImplementedError(
+                        "Only sparse and dense modes are supported for now"
+                    )
 
                 # FIXME: hypnopump@ simplify
                 if isinstance(valid_sum, int):
@@ -214,7 +212,7 @@ class ProDesign(Base_method):
         return test_perplexity, test_recovery, test_subcat_recovery
 
     def _cal_recovery(self, dataset, featurizer):
-        """ This part runs the sparse encoding for now. """
+        """This part runs the sparse encoding for now."""
         self.residue_type_cmp = torch.zeros(20, device="cuda:0")
         self.residue_type_num = torch.zeros(20, device="cuda:0")
         recovery = []
@@ -243,10 +241,18 @@ class ProDesign(Base_method):
                     node_mask,
                     edge_mask,
                 ) = self.model._get_features(
-                    S, score, X=X, mask=mask, mode="sparse",
+                    S,
+                    score,
+                    X=X,
+                    mask=mask,
+                    mode="sparse",
                 )
                 log_probs = self.model(
-                    h_V, h_E, E_idx, batch_id, mode="sparse",
+                    h_V,
+                    h_E,
+                    E_idx,
+                    batch_id,
+                    mode="sparse",
                 )
                 S_pred = torch.argmax(log_probs, dim=1)
                 cmp = S_pred == S
@@ -279,9 +285,10 @@ class ProDesign(Base_method):
     def loss_nll_flatten(self, S, log_probs, mask: Optional[torch.Tensor] = None):
         """Negative log probabilities"""
         criterion = torch.nn.NLLLoss(reduction="none")
-        loss = criterion(log_probs, S)
-        if mask is not None:
-            loss = loss[mask]
+        if mask is None:
+            loss = criterion(log_probs, S)
+        else:
+            loss = criterion(log_probs[mask], S[mask])
         loss_av = loss.mean()
         return loss, loss_av
 
@@ -291,10 +298,7 @@ class ProDesign(Base_method):
         """Negative log probabilities"""
         S_onehot = torch.nn.functional.one_hot(S, num_classes=20).float()
         S_onehot = S_onehot + weight / float(S_onehot.size(-1))
-        S_onehot = S_onehot / S_onehot.sum(
-            -1, keepdim=True
-        )  # [4, 463, 20]/[4, 463, 1] --> [4, 463, 20]
-
+        S_onehot = S_onehot.mean(dim=-1)  # (b n c)
         loss = -(S_onehot * log_probs).sum(-1)
         if mask is not None:
             loss = loss[mask]
