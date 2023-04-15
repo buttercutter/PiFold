@@ -204,6 +204,9 @@ def _get_features_sparse(
     edge_direct: bool,
 ) -> list[th.Tensor]:
     """Get the features for the model.
+    WARNING!
+    Edge encoding is (2, E) where 2 = (src, dst) in sparse mode.
+    Equivalent dense mode is (B, N, K) where src -> dst is k -> n
     Inputs:
     * S: ???
     * score: ???

@@ -62,6 +62,34 @@ class NeighborAttention(nn.Module):
         # FIXME: hypnopump@: only declare if self.output_mlp ??
         self.W_O = Linear(num_hidden, num_hidden, bias=False, init="final")
 
+    def dense_fw(self, h_V: th.Tensor, h_E: th.Tensor, edge_idx: th.Tensor, node_mask: th.Tensor, edge_mask: th.Tensor) -> th.Tensor:
+        """ Analog for dense inputs.
+        Inputs:
+        * h_V: (b, n, d) node features
+        * h_E: (b, n, k, dE) edge features
+        * edge_idx: (b, n, k) edge indices
+        * node_mask: (b, n) bool mask
+        * edge_mask: (b, n, k) bool mask
+        Outputs: (b, n, d)
+        """
+        h = self.num_heads
+        d = int(self.num_hidden / self.num_heads)
+        b, n, k, dE = h_E.shape
+
+        h_V_k2n = batched_index_select(h_V, edge_idx, dim=-2)  # (b, n, k, d)
+        w = self.Bias(th.cat([h_V_k2n, h_E], dim=-1)).mul_(d**0.5)  # (b, n, k, h)
+        attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
+
+        V = self.W_V(h_E).mul_(1 / d ** 0.5).reshape(b, n, k, h, d)  # (b, n, k, h, dim_head)
+        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1) # (b, n, d)
+
+        h_V_update = h_V
+        if self.output_mlp:
+            h_V_update = self.W_O(h_V)
+
+        return h_V_update
+
+
     def forward(
         self,
         h_V: th.Tensor,
@@ -114,7 +142,10 @@ class EdgeMLP(nn.Module):
         node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse"
     ) -> th.Tensor :
         if mode == "dense":
-            raise NotImplementedError
+            # (b, n, d), (b, n, k, dE), (b, n, d) -> (b, n, k, d), (b, n, k, dE), (b, n, (), d) -> (b, n, k, d+dE+d)
+            h_V_k2n = batched_index_select(h_V, edge_idx, dim=-1)
+            h_V_n2k = h_V[..., None, :].expand_as(h_V_k2n)
+            h_EV = th.cat((h_V_k2n, h_E, h_V_n2k), dim=-1)
 
         elif mode == "sparse":
             # (N, d1), (E, d2), (N, d1) -> (E, d1+d2+d1)
@@ -175,18 +206,28 @@ class Context(nn.Module):
 
     def forward(self, h_V, h_E, edge_idx, batch_id: th.Tensor, node_mask: Optional[th.Tensor] = None, edge_mask: Optional[th.Tensor] = None, mode: str = "sparse") -> tuple[th.Tensor, th.Tensor]:
         if mode == "dense":
-            raise NotImplementedError
+            if self.node_context or self.edge_context:
+                float_mask = node_mask.to(h_V.dtype)[..., None]
+                # (B N C) -> (B C)
+                h_V_mean = (h_V * float_mask).sum(dim=-2) / float_mask.sum(dim=-2).clamp_(min=1e-5)
 
+            if self.node_context: # (b n c) * (b () c)
+                h_V = h_V * self.V_MLP_g(h_V_mean)[..., None, :]
+            if self.edge_context: # (b n c) * (b () c)
+                h_E = h_E * self.E_MLP_g(h_V_mean)[..., None, :]
+
+            return h_V, h_E
+
+        if self.node_context or self.edge_context:
+            c_V = scatter_mean(h_V, batch_id, dim=0)
 
         if self.node_context:
-            c_V = scatter_mean(h_V, batch_id, dim=0)
             h_V = h_V * self.V_MLP_g(c_V[batch_id])
             # h_V = h_V + h_V * self.V_MLP_g(c_V[batch_id])
             # h_V = self.V_MLP(h_V) * self.V_MLP_g(c_V[batch_id])
             # h_V = h_V + self.V_MLP(h_V) * self.V_MLP_g(c_V[batch_id])
 
         if self.edge_context:
-            c_V = scatter_mean(h_V, batch_id, dim=0)
             h_E = h_E * self.E_MLP_g(c_V[batch_id[edge_idx[0]]])
 
         return h_V, h_E
@@ -242,7 +283,8 @@ class GeneralGNN(nn.Module):
 
     def forward(
         self,
-        h_V: th.Tensor, h_E: th.Tensor,
+        h_V: th.Tensor,
+        h_E: th.Tensor,
         edge_idx: Optional[th.Tensor] = None,
         batch_id: Optional[th.Tensor] = None,
         node_mask: Optional[th.Tensor] = None,
@@ -261,7 +303,12 @@ class GeneralGNN(nn.Module):
         """
         # sparse method
         if mode == "dense":
-            raise NotImplementedError
+            if self.node_net == "AttMLP" or self.node_net == "QKV":
+                h_EV = torch.cat([h_E, h_V[..., None, :].expand_as(h_E)], dim=-1)
+                dh = self.attention.dense_fw(h_V, h_EV, edge_idx, node_mask, edge_mask)
+            else:
+                dh = self.attention.dense_fw(h_V, h_E, edge_idx, node_mask, edge_mask)
+
         if mode == "sparse":
             src_idx, dst_idx = edge_idx
 
