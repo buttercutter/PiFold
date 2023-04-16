@@ -89,10 +89,10 @@ class NeighborAttention(nn.Module):
         w.masked_fill_(~edge_mask.unsqueeze(-1), max_neg)
         attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
 
-        V = (
-            self.W_V(h_E).mul_(1 / d**0.5).reshape(b, n, k, h, d)
-        )  # (b, n, k, h, dim_head)
-        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1)  # (b, n, d)
+        # (b, n, k, h, dim_head)
+        V = self.W_V(h_E).mul_(1 / d**0.5).reshape(b, n, k, h, d)
+        # (b, n, d)
+        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1)
 
         h_V_update = h_V
         if self.output_mlp:
@@ -143,6 +143,7 @@ class EdgeMLP(nn.Module):
         num_heads=None,
         scale=30,
         norm_class: nn.Module = nn.BatchNorm1d,
+        train_mode: str = "sparse",
     ):
         super(EdgeMLP, self).__init__()
         self.num_hidden = num_hidden
@@ -150,6 +151,7 @@ class EdgeMLP(nn.Module):
         self.scale = scale
         self.dropout = nn.Dropout(dropout)
         self.norm = norm_class(num_hidden)
+        self.train_mode = train_mode
         # TODO: hypnopump@: if not loading published models, turn into MLP ???
         self.W11 = Linear(num_hidden + num_in, num_hidden, bias=True, init="relu")
         self.W12 = Linear(num_hidden, num_hidden, bias=True, init="relu")
@@ -164,15 +166,14 @@ class EdgeMLP(nn.Module):
         batch_id: th.Tensor,
         node_mask: Optional[th.Tensor] = None,
         edge_mask: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ) -> th.Tensor:
-        if mode == "dense":
+        if self.train_mode == "dense":
             # (b, n, d), (b, n, k, dE), (b, n, d) -> (b, n, k, d), (b, n, k, dE), (b, n, (), d) -> (b, n, k, d+dE+d)
             h_V_k2n = batched_index_select(h_V, edge_idx, dim=-2)
             h_V_n2k = h_V[..., None, :].expand_as(h_V_k2n)
             h_EV = th.cat((h_V_k2n, h_E, h_V_n2k), dim=-1)
 
-        elif mode == "sparse":
+        elif self.train_mode == "sparse":
             # (N, d1), (E, d2), (N, d1) -> (E, d1+d2+d1)
             src_idx, dst_idx = edge_idx
             h_EV = torch.cat([h_V[src_idx], h_E, h_V[dst_idx]], dim=-1)
@@ -180,12 +181,11 @@ class EdgeMLP(nn.Module):
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         # TODO: hypnopump@: if inference and memory consumption is a problem, use inplace operation
         # TODO: hypnopump@: clarify reisudal better ??? either inside-block or outside-block, not mixed
-        e_b_idx = batch_id[edge_idx[0]] if mode == "sparse" else batch_id
+        e_b_idx = batch_id[edge_idx[0]] if self.train_mode == "sparse" else batch_id
         h_E = self.norm(
             h_E + self.dropout(h_message),
             batch_index=e_b_idx,
             mask=edge_mask,
-            mode=mode,
         )
         return h_E
 
@@ -199,8 +199,9 @@ class Context(nn.Module):
         dropout=0.1,
         num_heads=None,
         scale=30,
-        node_context=False,
-        edge_context=False,
+        node_context: bool=False,
+        edge_context: bool=False,
+        train_mode: str = "sparse",
     ):
         super(Context, self).__init__()
         self.num_hidden = num_hidden
@@ -208,6 +209,7 @@ class Context(nn.Module):
         self.scale = scale
         self.node_context = node_context
         self.edge_context = edge_context
+        self.train_mode = train_mode
 
         self.V_MLP = nn.Sequential(
             Linear(num_hidden, num_hidden, init="relu"),
@@ -243,15 +245,13 @@ class Context(nn.Module):
         batch_id: th.Tensor,
         node_mask: Optional[th.Tensor] = None,
         edge_mask: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ) -> tuple[th.Tensor, th.Tensor]:
-        if mode == "dense":
+        if self.train_mode == "dense":
             if self.node_context or self.edge_context:
                 float_mask = node_mask.to(h_V.dtype)[..., None]
+                num_nodes = float_mask.sum(dim=-2).add_(1e-5)
                 # (B N C) -> (B C)
-                h_V_mean = (h_V * float_mask).sum(dim=-2) / float_mask.sum(dim=-2).add_(
-                    1e-5
-                )
+                h_V_mean = (h_V * float_mask).sum(dim=-2) / num_nodes
 
             if self.node_context:  # (b n c) * (b () c)
                 h_V = h_V * self.V_MLP_g(h_V_mean)[..., None, :]
@@ -288,6 +288,7 @@ class GeneralGNN(nn.Module):
         node_context=0,
         edge_context=0,
         norm_class: nn.Module = nn.BatchNorm1d,
+        train_mode: str = "sparse",
     ):
         super(GeneralGNN, self).__init__()
         self.num_hidden = num_hidden
@@ -297,13 +298,14 @@ class GeneralGNN(nn.Module):
         self.norm = nn.ModuleList([norm_class(num_hidden) for _ in range(2)])
         self.node_net = node_net
         self.edge_net = edge_net
+        self.train_mode = train_mode
         if node_net == "AttMLP":
             self.attention = NeighborAttention(num_hidden, num_in, num_heads=num_heads)
         if edge_net == "None":
             pass
         if edge_net == "EdgeMLP":
             self.edge_update = EdgeMLP(
-                num_hidden, num_in, num_heads=num_heads, norm_class=norm_class
+                num_hidden, num_in, num_heads=num_heads, norm_class=norm_class, train_mode=train_mode
             )
 
         self.context = Context(
@@ -312,6 +314,7 @@ class GeneralGNN(nn.Module):
             num_heads=num_heads,
             node_context=node_context,
             edge_context=edge_context,
+            train_mode=train_mode,
         )
 
         self.dense = nn.Sequential(
@@ -333,7 +336,6 @@ class GeneralGNN(nn.Module):
         batch_id: Optional[th.Tensor] = None,
         node_mask: Optional[th.Tensor] = None,
         edge_mask: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ) -> tuple[th.Tensor, th.Tensor]:
         """Implements the `sparse` forward. See `self.dense_forward` for dense.
         Inputs:
@@ -346,14 +348,14 @@ class GeneralGNN(nn.Module):
         * edge_mask: (B, N, K), edge mask. only required for dense mode
         """
         # sparse method
-        if mode == "dense":
+        if self.train_mode == "dense":
             if self.node_net == "AttMLP" or self.node_net == "QKV":
                 h_EV = torch.cat([h_E, h_V[..., None, :].expand_as(h_E)], dim=-1)
                 dh = self.attention.dense_fw(h_V, h_EV, edge_idx, node_mask, edge_mask)
             else:
                 dh = self.attention.dense_fw(h_V, h_E, edge_idx, node_mask, edge_mask)
 
-        if mode == "sparse":
+        if self.train_mode == "sparse":
             src_idx, dst_idx = edge_idx
 
             if self.node_net == "AttMLP" or self.node_net == "QKV":
@@ -368,13 +370,14 @@ class GeneralGNN(nn.Module):
                 dh = self.attention(h_V, h_E, src_idx, batch_id, dst_idx)
 
         h_V = self.norm[0](
-            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask, mode=mode
+            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask
         )
         dh = self.dense(h_V)
         h_V = self.norm[1](
-            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask, mode=mode
+            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask
         )
 
+        # FIXME: hypnopump@ residual should be here and keep a clean path (norm on addition)
         if self.edge_net == "None":
             pass
         else:
@@ -385,7 +388,6 @@ class GeneralGNN(nn.Module):
                 batch_id,
                 node_mask=node_mask,
                 edge_mask=edge_mask,
-                mode=mode,
             )
 
         h_V, h_E = self.context(
@@ -395,7 +397,6 @@ class GeneralGNN(nn.Module):
             batch_id,
             node_mask=node_mask,
             edge_mask=edge_mask,
-            mode=mode,
         )
         return h_V, h_E
 
@@ -413,6 +414,7 @@ class StructureEncoder(nn.Module):
         edge_context: bool = False,
         checkpoint: bool = False,
         norm_class: nn.Module = nn.BatchNorm1d,
+        train_mode: str = "sparse",
     ):
         """Graph labeling network"""
         super(StructureEncoder, self).__init__()
@@ -432,6 +434,7 @@ class StructureEncoder(nn.Module):
                     node_context=node_context,
                     edge_context=edge_context,
                     norm_class=norm_class,
+                    train_mode=train_mode,
                 ),
             )
 
@@ -445,7 +448,6 @@ class StructureEncoder(nn.Module):
         batch_id,
         node_mask: Optional[th.Tensor] = None,
         edge_mask: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ):
         """Inputs:
         ...
@@ -463,7 +465,6 @@ class StructureEncoder(nn.Module):
                     batch_id,
                     node_mask,
                     edge_mask,
-                    mode,
                 )
             else:
                 h_V, h_P = layer(
@@ -473,17 +474,18 @@ class StructureEncoder(nn.Module):
                     batch_id,
                     node_mask=node_mask,
                     edge_mask=edge_mask,
-                    mode=mode,
                 )
         return h_V, h_P
 
 
 class MLPDecoder(nn.Module):
     def __init__(
-        self, hidden_dim, vocab: int = 20, norm_class: nn.Module = nn.BatchNorm1d
+        self, hidden_dim, vocab: int = 20, norm_class: nn.Module = nn.BatchNorm1d, train_mode: str = "sparse",
     ):
         super().__init__()
         self.readout = Linear(hidden_dim, vocab, init="final")
+        self.norm_class = norm_class
+        self.train_mode = train_mode
 
     def forward(
         self,
@@ -491,7 +493,6 @@ class MLPDecoder(nn.Module):
         batch_id: Optional[th.Tensor] = None,
         node_mask: Optional[th.Tensor] = None,
         edge_mask: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ) -> tuple[th.Tensor, th.Tensor]:
         logits = self.readout(h_V)
         log_probs = F.log_softmax(logits, dim=-1)

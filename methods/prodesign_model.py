@@ -18,13 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 class NormWrapper(nn.Module):
-    def __init__(self, *args, norm_choice: str, **kwargs):
+    def __init__(self, *args, norm_choice: str, train_mode: str, **kwargs):
         """Wraps different norm choices and considerations.
         Inputs:
         * norm_choice: str. One of ["batchnorm", "layernorm", "none"]
         """
         super().__init__()
         self.norm_choice = norm_choice
+        self.train_mode = train_mode
 
         self.norm = nn.Identity()
         if norm_choice == "batchnorm":
@@ -41,7 +42,6 @@ class NormWrapper(nn.Module):
         x: th.Tensor,
         mask: Optional[th.Tensor] = None,
         batch_index: Optional[th.Tensor] = None,
-        mode: str = "sparse",
     ) -> th.Tensor:
         """Runs norm of choice dealing with custom needs for aggregation / masking.
         Inputs:
@@ -49,7 +49,7 @@ class NormWrapper(nn.Module):
         * mask: th.Tensor. Mask of valid nodes. Needed for batchnorm in dense mode.
         """
         if self.norm_choice == "batchnorm":
-            if mode == "dense":
+            if self.train_mode == "dense":
                 assert (
                     mask is not None
                 ), f"Dense implementation of {self.norm_choice} requires a mask."
@@ -58,7 +58,7 @@ class NormWrapper(nn.Module):
                 return x_
 
         elif self.norm_choice == "layernorm":
-            if mode == "sparse":
+            if self.train_mode == "sparse":
                 assert (
                     batch_index is not None
                 ), f"Sparse implementation of {self.norm_choice} requires a batch index."
@@ -74,7 +74,7 @@ class NormWrapper(nn.Module):
 class ProDesign_Model(nn.Module):
     def __init__(self, args, **kwargs):
         """Graph labeling network"""
-        super(ProDesign_Model, self).__init__()
+        super().__init__()
         self.args = args
         node_features = args.node_features
         edge_features = args.edge_features
@@ -84,7 +84,7 @@ class ProDesign_Model(nn.Module):
         self.top_k = args.k_neighbors
         self.num_rbf = 16
         self.num_positional_embeddings = 16
-        self.norm_class = partial(NormWrapper, norm_choice=args.norm_choice)
+        self.norm_class = partial(NormWrapper, norm_choice=args.norm_choice, train_mode=args.train_mode)
 
         # prior_matrix = [
         #     [-0.58273431, 0.56802827, -0.54067466],
@@ -149,9 +149,10 @@ class ProDesign_Model(nn.Module):
             num_heads=args.num_heads,
             checkpoint=args.checkpoint,
             norm_class=self.norm_class,
+            train_mode=args.train_mode,
         )
 
-        self.decoder = MLPDecoder(hidden_dim, norm_class=self.norm_class)
+        self.decoder = MLPDecoder(hidden_dim, norm_class=self.norm_class, train_mode=args.train_mode)
         self._init_params()
 
         self.encode_t = 0
@@ -169,32 +170,29 @@ class ProDesign_Model(nn.Module):
         mask_fw=None,
         decoding_order=None,
         return_logit=False,
-        mode: str = "sparse",
         node_mask: Optional[torch.Tensor] = None,
         edge_mask: Optional[torch.Tensor] = None,
     ):
         t1 = time.time()
         # node and edge embeddings
         h_V = self.norm_nodes(
-            self.node_embedding(h_V), batch_index=batch_id, mask=node_mask, mode=mode
+            self.node_embedding(h_V), batch_index=batch_id, mask=node_mask
         )
         h_V = self.W_v_norm1(
             self.W_v_act(self.W_v[0](h_V)),
             batch_index=batch_id,
-            mask=node_mask,
-            mode=mode,
+            mask=node_mask
         )
         h_V = self.W_v_norm2(
             self.W_v_act(self.W_v[1](h_V)),
             batch_index=batch_id,
-            mask=node_mask,
-            mode=mode,
+            mask=node_mask
         )
         h_V = self.W_v[2](h_V)
-        e_b_idx = batch_id[P_idx[0]] if mode == "sparse" else batch_id
+        e_b_idx = batch_id[P_idx[0]] if self.args.train_mode == "sparse" else batch_id
         h_P = self.W_e(
             self.norm_edges(
-                self.edge_embedding(h_P), batch_index=e_b_idx, mask=edge_mask, mode=mode
+                self.edge_embedding(h_P), batch_index=e_b_idx, mask=edge_mask
             )
         )
 
@@ -203,14 +201,13 @@ class ProDesign_Model(nn.Module):
             h_P,
             P_idx,
             batch_id,
-            mode=mode,
             node_mask=node_mask,
             edge_mask=edge_mask,
         )
         t2 = time.time()
 
         log_probs, logits = self.decoder(
-            h_V, batch_id, mode=mode, node_mask=node_mask, edge_mask=edge_mask
+            h_V, batch_id, node_mask=node_mask, edge_mask=edge_mask
         )
 
         t3 = time.time()

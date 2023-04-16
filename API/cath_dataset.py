@@ -10,6 +10,8 @@ from tqdm import tqdm
 
 from .featurizer import ALPHABET
 from .utils import cached_property
+from functools import lru_cache
+
 
 
 class CATH(data.Dataset):

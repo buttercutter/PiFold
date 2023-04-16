@@ -1,0 +1,4 @@
+2023-04-16 14:45:04,200 - Task was destroyed but it is pending!
+task: <Task pending name='Task-1' coro=<Kernel.poll_control_queue() running at /Users/ericalcaidealdeano/miniconda3/envs/assistant-dev/lib/python3.10/site-packages/ipykernel/kernelbase.py:284> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_chain_future.<locals>._call_set_state() at /Users/ericalcaidealdeano/miniconda3/envs/assistant-dev/lib/python3.10/asyncio/futures.py:392]>
+2023-04-16 17:07:17,217 - Task was destroyed but it is pending!
+task: <Task pending name='Task-2' coro=<Kernel.poll_control_queue() running at /Users/ericalcaidealdeano/miniconda3/envs/openbioml/lib/python3.10/site-packages/ipykernel/kernelbase.py:287> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_chain_future.<locals>._call_set_state() at /Users/ericalcaidealdeano/miniconda3/envs/openbioml/lib/python3.10/asyncio/futures.py:391]>
