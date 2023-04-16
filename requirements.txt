@@ -149,10 +149,8 @@ traitlets==5.9.0
 transformers==4.27.4
 triton==2.0.0
 typepy==1.3.0
-typing_extensions @ file:///croot/typing_extensions_1669924550328/work
 tzdata==2023.3
 uri-template==1.2.0
-urllib3 @ file:///croot/urllib3_1680254681959/work
 wandb==0.14.2
 wcwidth==0.2.6
 webcolors==1.13

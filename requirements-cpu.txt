@@ -11,7 +11,6 @@ Babel==2.12.1
 backcall==0.2.0
 beautifulsoup4==4.12.2
 bleach==6.0.0
-certifi @ file:///private/var/folders/sy/f16zz6x50xz3113nwtb9bvq00000gp/T/abs_477u68wvzm/croot/certifi_1671487773341/work/certifi
 cffi==1.15.1
 charset-normalizer==3.1.0
 comm==0.1.3
