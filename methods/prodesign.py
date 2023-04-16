@@ -260,18 +260,16 @@ class ProDesign(Base_method):
                     node_mask=node_mask,
                     edge_mask=edge_mask,
                 )
-                S_pred = torch.argmax(log_probs, dim=1)
+                S_pred = torch.argmax(log_probs, dim=-1)
                 cmp = (S_pred == S).float()
+                if self.args.train_mode == "dense":
+                    cmp = cmp[node_mask.bool()]  # (b n) -> mask(b n)
+                    S = S[node_mask.bool()]
 
-                self.residue_type_cmp += scatter_sum(
-                    cmp, S.long(), dim=0, dim_size=20
-                )
+                self.residue_type_cmp += scatter_sum(cmp, S.long(), dim=0, dim_size=20)
                 self.residue_type_num += scatter_sum(
                     torch.ones_like(cmp), S.long(), dim=0, dim_size=20
                 )
-
-                if self.args.train_mode == "dense":
-                    cmp = cmp[node_mask.bool()]  # (b n) -> mask(b n)
 
                 recovery_ = cmp.mean().item()
 
@@ -311,6 +309,6 @@ class ProDesign(Base_method):
         S_onehot = S_onehot.mean(dim=-1)  # (b n c)
         loss = -(S_onehot * log_probs).sum(-1)
         if mask is not None:
-            loss = loss[mask] # (b n) -> mask(b n)
+            loss = loss[mask]  # (b n) -> mask(b n)
         loss_av = torch.sum(loss.mean())
         return loss, loss_av

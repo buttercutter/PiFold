@@ -211,4 +211,4 @@ if __name__ == "__main__":
 
     print(">>>>>>>>>>>>>>>>>>>>>>>>>> testing  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
     test_perp, test_rec, test_subcat_recovery = exp.test()
-    exp.end_logger()
+    exp.end_logger(test_perp, test_rec)
