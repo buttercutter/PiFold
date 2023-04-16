@@ -47,6 +47,8 @@ class TS(data.Dataset):
                 }
             )
 
+        self.data = sorted(self.data, key=lambda x: len(x["seq"]))
+
     def __len__(self):
         return len(self.data)
 
