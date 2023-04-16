@@ -16,7 +16,7 @@ class ProDesign(Base_method):
     def __init__(self, args, device, steps_per_epoch):
         Base_method.__init__(self, args, device, steps_per_epoch)
         self.model = self._build_model()
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(reduction="none")
         self.optimizer, self.scheduler = self._init_optimizer(steps_per_epoch)
         self.transfer_func = lambda x: x
         if self.args.use_gpu:
@@ -59,9 +59,13 @@ class ProDesign(Base_method):
                 edge_mask=edge_mask,
             )
             if self.args.train_mode == "sparse":
-                loss = self.criterion(log_probs, S)
+                loss = self.criterion(log_probs, S).mean()
             elif self.args.train_mode == "dense":
-                loss = self.criterion(log_probs[node_mask], S[node_mask])
+                node_mask_unrolled = node_mask.reshape(-1)
+                log_probs_unrolled = log_probs.reshape(-1, log_probs.shape[-1])
+                S_unrolled = S.reshape(-1)
+                loss = self.criterion(log_probs_unrolled, S_unrolled)
+                loss = (loss * node_mask_unrolled).sum() / node_mask_unrolled.sum()
             else:
                 raise NotImplementedError(
                     "Only sparse and dense modes are supported for now"
@@ -124,9 +128,13 @@ class ProDesign(Base_method):
                     edge_mask=edge_mask,
                 )
                 if self.args.train_mode == "sparse":
-                    loss = self.criterion(log_probs, S)
+                    loss = self.criterion(log_probs, S).mean()
                 elif self.args.train_mode == "dense":
-                    loss = self.criterion(log_probs[node_mask], S[node_mask])
+                    node_mask_unrolled = node_mask.reshape(-1)
+                    log_probs_unrolled = log_probs.reshape(-1, log_probs.shape[-1])
+                    S_unrolled = S.reshape(-1)
+                    loss = self.criterion(log_probs_unrolled, S_unrolled)
+                    loss = (loss * node_mask_unrolled).sum() / node_mask_unrolled.sum()
                 else:
                     raise NotImplementedError(
                         "Only sparse and dense modes are supported for now"

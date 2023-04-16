@@ -461,9 +461,9 @@ class StructureEncoder(nn.Module):
                     h_P,
                     P_idx,
                     batch_id,
-                    node_mask=node_mask,
-                    edge_mask=edge_mask,
-                    mode=mode,
+                    node_mask,
+                    edge_mask,
+                    mode,
                 )
             else:
                 h_V, h_P = layer(

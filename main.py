@@ -10,6 +10,7 @@ warnings.filterwarnings("ignore")
 
 import logging
 from pathlib import Path
+
 from API import Recorder
 from methods import ProDesign
 from utils import *
@@ -62,7 +63,7 @@ class Exp:
         self._build_method()
 
     def _build_method(self):
-        steps_per_epoch = 1000
+        steps_per_epoch = 2000  # 1000
         if self.args.method == "ProDesign":
             self.method = ProDesign(self.args, self.device, steps_per_epoch)
 
@@ -70,9 +71,13 @@ class Exp:
         if self.args.from_pretrained is not None:
             if Path.isfile(self.args.pretrained_model):
                 logger.info(f"Loading checkpoint '{self.args.pretrained_model}'")
-                self.method.model.load_state_dict(torch.load(self.args.pretrained_model, map_location=self.device))
+                self.method.model.load_state_dict(
+                    torch.load(self.args.pretrained_model, map_location=self.device)
+                )
             else:
-                logger.error(f"Could not load '{self.args.pretrained_model}' and starting from scratch")
+                logger.error(
+                    f"Could not load '{self.args.pretrained_model}' and starting from scratch"
+                )
 
     def _get_data(self):
         data = get_dataset(self.config)
@@ -85,7 +90,7 @@ class Exp:
                 self.train_loader
             )
 
-            if args.wandb_project:
+            if self.args.wandb_project:
                 train_log = {
                     "Train/Loss": train_loss,
                     "Train/Perplexity": train_perplexity,
@@ -171,11 +176,11 @@ class Exp:
         return test_perplexity, test_recovery, test_subcat_recovery
 
     def init_logger(self, config: dict) -> None:
-        if args.wandb_project:
-            wandb.init(project=args.wandb_project, config=config)
+        if self.args.wandb_project:
+            wandb.init(project=self.args.wandb_project, config=config)
 
     def end_logger(self, test_perp: float, test_rec: float) -> None:
-        if args.wandb_project:
+        if self.args.wandb_project:
             wandb.summary["test_perplexity"] = test_perp
             wandb.summary["test_recovery"] = test_rec
             wandb.finish()
@@ -184,7 +189,7 @@ class Exp:
 if __name__ == "__main__":
     from parser import create_parser
 
-    args = create_parser()
+    args = create_parser().parse_args()
     config = args.__dict__
 
     if args.wandb_project:

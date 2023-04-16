@@ -91,4 +91,4 @@ def create_parser():
     parser.add_argument("--edge_direct", default=1, type=int)
     parser.add_argument("--virtual_num", default=3, type=int)
 
-    return parser.parse_args()
+    return parser
