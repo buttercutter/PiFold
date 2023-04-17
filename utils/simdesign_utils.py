@@ -20,7 +20,7 @@ Notation:
 """
 
 
-def safe_cdist(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+def safe_cdist(X: th.Tensor, Y: th.Tensor, eps: float = 1e-7) -> th.Tensor:
     """Manual op is faster on CUDA than torch.cdist (no matmul as numerical precision issues).
     (but not in ARM CPU, where cpu kernel is faster).
     """

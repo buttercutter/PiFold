@@ -30,7 +30,7 @@ class CATH(data.Dataset):
     def cache_data(self):
         alphabet_set = set(ALPHABET)
         if not os.path.exists(self.path):
-            raise "no such file:{} !!!".format(self.path)
+            raise ValueError(f"no such file:{self.path} !!!")
         else:
             with open(self.path + "/chain_set.jsonl") as f:
                 lines = f.readlines()

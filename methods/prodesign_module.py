@@ -82,17 +82,18 @@ class NeighborAttention(nn.Module):
         h = self.num_heads
         d = int(self.num_hidden / self.num_heads)
         b, n, k, dE = h_E.shape
+        max_neg = -torch.finfo(h_E.dtype).max
 
-        h_V_k2n = batched_index_select(h_V, edge_idx, dim=-2)  # (b, n, k, d)
-        w = self.Bias(th.cat((h_V_k2n, h_E), dim=-1)).mul_(d**0.5)  # (b, n, k, h)
-        max_neg = -torch.finfo(w.dtype).max
+        h_V_k2n = h_V[..., None, :].repeat(1, 1, k, 1)  # (b, n, k, d)
+        V = self.W_V(h_E).reshape(b, n, k, h, d)  # (b, n, k, h, d_head)
+        w = self.Bias(th.cat((h_V_k2n, h_E), dim=-1))  # (b, n, k, h)
+        w = w.mul_(1 / d ** 0.5)
         w.masked_fill_(~edge_mask.unsqueeze(-1), max_neg)
-        attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
 
-        # (b, n, k, h, dim_head)
-        V = self.W_V(h_E).mul_(1 / d**0.5).reshape(b, n, k, h, d)
-        # (b, n, d)
-        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1)
+        attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
+        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1) # (b, n, d)
+
+        # print("h_V", h_V[:5, :5])
 
         h_V_update = h_V
         if self.output_mlp:
@@ -114,22 +115,21 @@ class NeighborAttention(nn.Module):
         d = int(self.num_hidden / n_heads)
 
         # (N,d1), (E,d2) -> (E,d1), (E,d2) -> (E,d1+d2) -> (E, heads, 1)
-        w = (
-            self.Bias(th.cat([h_V[center_id], h_E], dim=-1))
-            .view(E, n_heads, 1)
-            .mul_(d**0.5)
-        )
+        pre_w = th.cat([h_V[center_id], h_E], dim=-1)
+        w = self.Bias(th.cat([h_V[center_id], h_E], dim=-1)).mul_(1/d**0.5)
+        w = w.view(E, n_heads, 1)
         # (E, d2) -> (E, heads, d)
         V = self.W_V(h_E).view(-1, n_heads, d)
-        # (E, heads, 1)
-        attend = scatter_softmax(w.mul_(1 / d**0.5), index=center_id, dim=0)
-        # (E, heads, d) * (E, heads, 1) -> (N, heads * d)
-        h_V = scatter_sum(attend * V, center_id, dim=0).view([-1, self.num_hidden])
 
+        # (E, heads, 1)
+        attend = scatter_softmax(w, index=center_id, dim=0)
+        # (E, heads, d) * (E, heads, 1) -> (N, heads * d)
+        h_V = scatter_sum(attend * V, center_id, dim=0).reshape(h_V.shape[0], -1)
+
+        h_V_update = h_V
         if self.output_mlp:
             h_V_update = self.W_O(h_V)
-        else:
-            h_V_update = h_V
+
         return h_V_update
 
 
@@ -181,12 +181,7 @@ class EdgeMLP(nn.Module):
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         # TODO: hypnopump@: if inference and memory consumption is a problem, use inplace operation
         # TODO: hypnopump@: clarify reisudal better ??? either inside-block or outside-block, not mixed
-        e_b_idx = batch_id[edge_idx[0]] if self.train_mode == "sparse" else batch_id
-        h_E = self.norm(
-            h_E + self.dropout(h_message),
-            batch_index=e_b_idx,
-            mask=edge_mask,
-        )
+        h_E = self.norm(h_E + self.dropout(h_message), mask=edge_mask)
         return h_E
 
 
@@ -350,7 +345,9 @@ class GeneralGNN(nn.Module):
         # sparse method
         if self.train_mode == "dense":
             if self.node_net == "AttMLP" or self.node_net == "QKV":
-                h_EV = torch.cat([h_E, h_V[..., None, :].expand_as(h_E)], dim=-1)
+                h_EV = batched_index_select(h_V, edge_idx, dim=-2)
+                h_EV = torch.cat([h_E, h_EV], dim=-1)
+                # h_EV = torch.cat([h_E, h_V[..., None, :].expand_as(h_E)], dim=-1)
                 dh = self.attention.dense_fw(h_V, h_EV, edge_idx, node_mask, edge_mask)
             else:
                 dh = self.attention.dense_fw(h_V, h_E, edge_idx, node_mask, edge_mask)
@@ -359,23 +356,14 @@ class GeneralGNN(nn.Module):
             src_idx, dst_idx = edge_idx
 
             if self.node_net == "AttMLP" or self.node_net == "QKV":
-                dh = self.attention(
-                    h_V,
-                    torch.cat([h_E, h_V[dst_idx]], dim=-1),
-                    src_idx,
-                    batch_id,
-                    dst_idx,
-                )
+                h_EV = torch.cat([h_E, h_V[dst_idx]], dim=-1)
+                dh = self.attention(h_V, h_EV, src_idx, batch_id, dst_idx)
             else:
                 dh = self.attention(h_V, h_E, src_idx, batch_id, dst_idx)
 
-        h_V = self.norm[0](
-            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask
-        )
+        h_V = self.norm[0](h_V + self.dropout(dh), mask=node_mask)
         dh = self.dense(h_V)
-        h_V = self.norm[1](
-            h_V + self.dropout(dh), batch_index=batch_id, mask=node_mask
-        )
+        h_V = self.norm[1](h_V + self.dropout(dh), mask=node_mask)
 
         # FIXME: hypnopump@ residual should be here and keep a clean path (norm on addition)
         if self.edge_net == "None":

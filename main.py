@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import logging
 import os.path as osp
@@ -5,6 +6,7 @@ import pickle
 import warnings
 
 import torch
+from typing import Any
 
 warnings.filterwarnings("ignore")
 
@@ -27,6 +29,54 @@ class Exp:
         self._preparation()
         if show_params:
             print_log(output_namespace(self.args))
+
+
+    def recursive_set_(self, arg_name: str, new_value: Any) -> Exp:
+        """ Recursively sets arg to the module and nn.Module children """
+        # to self
+        if arg_name in self.args.__dict__:
+            self.args.__dict__[arg_name] = new_value
+        # to method
+        if arg_name in self.method.args.__dict__:
+            self.method.args.__dict__[arg_name] = new_value
+        # to model
+        if arg_name in self.method.model.args.__dict__:
+            self.method.model.args.__dict__[arg_name] = new_value
+        # to decoder. Attr, no longer a dict
+        if arg_name in self.method.model.decoder.__dict__:
+            self.method.model.decoder.__dict__[arg_name] = new_value
+        # to encoder
+        if arg_name in self.method.model.encoder.__dict__:
+            self.method.model.encoder.__dict__[arg_name] = new_value
+        # to encoder layers
+        for i,layer in enumerate(self.method.model.encoder.encoder_layers):
+            if arg_name in layer.__dict__:
+                self.method.model.encoder.encoder_layers[i].__dict__[arg_name] = new_value
+            # to encoder edge_update
+            if arg_name in layer.edge_update.__dict__:
+                self.method.model.encoder.encoder_layers[i].edge_update.__dict__[arg_name] = new_value
+                self.method.model.encoder.encoder_layers[i].edge_update.norm.__dict__[arg_name] = new_value
+            # to encoder context
+            if arg_name in layer.context.__dict__:
+                self.method.model.encoder.encoder_layers[i].context.__dict__[arg_name] = new_value
+            # to encoder context
+            if arg_name in layer.attention.__dict__:
+                self.method.model.encoder.encoder_layers[i].attention.__dict__[arg_name] = new_value
+            # to encoder norms
+            for j, norm in enumerate(layer.norm):
+                if arg_name in norm.__dict__:
+                    self.method.model.encoder.encoder_layers[i].norm[j].__dict__[arg_name] = new_value
+        # to embedding norms
+        if arg_name in self.method.model.norm_nodes.__dict__:
+            self.method.model.norm_nodes.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.norm_edges.__dict__:
+            self.method.model.norm_edges.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.W_v_norm1.__dict__:
+            self.method.model.W_v_norm1.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.W_v_norm2.__dict__:
+            self.method.model.W_v_norm2.__dict__[arg_name] = new_value
+
+        return self
 
     def _acquire_device(self):
         if self.args.use_gpu:

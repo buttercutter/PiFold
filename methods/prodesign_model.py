@@ -6,7 +6,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn.norm.layer_norm import LayerNorm as sparseLayerNorm
 
 from utils import _dihedrals, _get_rbf, _orientations_coarse_gl_tuple, gather_nodes
 
@@ -31,7 +30,7 @@ class NormWrapper(nn.Module):
         if norm_choice == "batchnorm":
             self.norm = nn.BatchNorm1d(*args, **kwargs)
         elif norm_choice == "layernorm":
-            self.norm = sparseLayerNorm(*args, **kwargs)
+            self.norm = nn.LayerNorm(*args, **kwargs)
         else:
             logger.warning(
                 f"Coyld not recognize norm choice {norm_choice}. Setting Identity"
@@ -41,7 +40,7 @@ class NormWrapper(nn.Module):
         self,
         x: th.Tensor,
         mask: Optional[th.Tensor] = None,
-        batch_index: Optional[th.Tensor] = None,
+        eps: float = 1.0e-5,
     ) -> th.Tensor:
         """Runs norm of choice dealing with custom needs for aggregation / masking.
         Inputs:
@@ -56,17 +55,6 @@ class NormWrapper(nn.Module):
                 x_ = x.clone()
                 x_[mask] = self.norm(x_[mask])
                 return x_
-
-        elif self.norm_choice == "layernorm":
-            if self.train_mode == "sparse":
-                assert (
-                    batch_index is not None
-                ), f"Sparse implementation of {self.norm_choice} requires a batch index."
-                return self.norm(x, batch_index)
-            else:
-                return F.layer_norm(
-                    x, [*x.shape[-1:]], self.norm.weight, self.norm.bias, self.norm.eps
-                )
 
         return self.norm(x)
 
@@ -175,26 +163,17 @@ class ProDesign_Model(nn.Module):
     ):
         t1 = time.time()
         # node and edge embeddings
-        h_V = self.norm_nodes(
-            self.node_embedding(h_V), batch_index=batch_id, mask=node_mask
-        )
+        h_V = self.norm_nodes(self.node_embedding(h_V), mask=node_mask)
         h_V = self.W_v_norm1(
             self.W_v_act(self.W_v[0](h_V)),
-            batch_index=batch_id,
             mask=node_mask
         )
         h_V = self.W_v_norm2(
             self.W_v_act(self.W_v[1](h_V)),
-            batch_index=batch_id,
             mask=node_mask
         )
         h_V = self.W_v[2](h_V)
-        e_b_idx = batch_id[P_idx[0]] if self.args.train_mode == "sparse" else batch_id
-        h_P = self.W_e(
-            self.norm_edges(
-                self.edge_embedding(h_P), batch_index=e_b_idx, mask=edge_mask
-            )
-        )
+        h_P = self.W_e(self.norm_edges(self.edge_embedding(h_P), mask=edge_mask))
 
         h_V, h_P = self.encoder(
             h_V,
@@ -232,13 +211,9 @@ class ProDesign_Model(nn.Module):
         score: torch.Tensor,
         X: torch.Tensor,
         mask: torch.Tensor,
-        mode: str = "sparse",
     ) -> list[torch.Tensor]:
         """Gets features as it needs the virtual atoms."""
-        _get_features_func = (
-            _get_features_sparse if mode == "sparse" else _get_features_dense
-        )
-        return _get_features_func(
+        feats = _get_features_dense(
             S=S,
             score=score,
             X=X,
@@ -255,3 +230,9 @@ class ProDesign_Model(nn.Module):
             edge_angle=self.args.edge_angle,
             edge_direct=self.args.edge_direct,
         )
+        if self.args.train_mode == "sparse":
+            return _get_features_sparse(*feats, mask=mask)
+        return feats
+
+
+

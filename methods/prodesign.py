@@ -46,9 +46,7 @@ class ProDesign(Base_method):
                 decoding_order,
                 node_mask,
                 edge_mask,
-            ) = self.model._get_features(
-                S, score, X=X, mask=mask, mode=self.args.train_mode
-            )
+            ) = self.model._get_features(S, score, X=X, mask=mask)
             log_probs = self.model(
                 h_V,
                 h_E,
@@ -114,9 +112,7 @@ class ProDesign(Base_method):
                     decoding_order,
                     node_mask,
                     edge_mask,
-                ) = self.model._get_features(
-                    S, score, X=X, mask=mask, mode=self.args.train_mode
-                )
+                ) = self.model._get_features(S, score, X=X, mask=mask)
                 log_probs = self.model(
                     h_V,
                     h_E,
@@ -178,9 +174,7 @@ class ProDesign(Base_method):
                     decoding_order,
                     node_mask,
                     edge_mask,
-                ) = self.model._get_features(
-                    S, score, X=X, mask=mask, mode=self.args.train_mode
-                )
+                ) = self.model._get_features(S, score, X=X, mask=mask)
                 log_probs = self.model(
                     h_V,
                     h_E,
@@ -245,13 +239,7 @@ class ProDesign(Base_method):
                     decoding_order,
                     node_mask,
                     edge_mask,
-                ) = self.model._get_features(
-                    S,
-                    score,
-                    X=X,
-                    mask=mask,
-                    mode=self.args.train_mode,
-                )
+                ) = self.model._get_features(S, score, X=X, mask=mask)
                 log_probs = self.model(
                     h_V,
                     h_E,
@@ -266,10 +254,12 @@ class ProDesign(Base_method):
                     cmp = cmp[node_mask.bool()]  # (b n) -> mask(b n)
                     S = S[node_mask.bool()]
 
-                self.residue_type_cmp += scatter_sum(cmp, S.long(), dim=0, dim_size=20)
-                self.residue_type_num += scatter_sum(
-                    torch.ones_like(cmp), S.long(), dim=0, dim_size=20
-                )
+                # += scatter_sum(cmp, S.long(), dim=0, dim_size=20)
+                # += scatter_sum(torch.ones_like(cmp), S.long(), dim=0, dim_size=20)
+                scatter_mat = th.zeros(20, b_.shape[0], device=cmp.device, dtype=cmp.dtype)
+                scatter_mat[S.long(), th.arange(b_.shape[0])] = 1
+                self.residue_type_cmp = scatter_mat @ cmp
+                self.residue_type_num = scatter_mat @ torch.ones_like(cmp)
 
                 recovery_ = cmp.mean().item()
 

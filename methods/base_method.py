@@ -1,4 +1,6 @@
+from __future__ import annotations
 from .optim_scheduler import get_optim_scheduler
+
 
 class Base_method(object):
     def __init__(self, args, device, steps_per_epoch):

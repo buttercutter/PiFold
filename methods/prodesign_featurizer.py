@@ -191,9 +191,8 @@ def _get_features_dense(
 
     _V = th.cat(h_V, dim=-1)  # (B, N, D)
     _E = th.cat(h_E, dim=-1)  # (B, N, K, D)
-    batch_id = th.arange(X.shape[0], device=X.device)[..., None].expand_as(
-        mask
-    )  # (B, N)
+    # (B, N)
+    batch_id = th.arange(X.shape[0], device=X.device)[..., None].expand_as(mask)
     return (
         X,
         S,
@@ -210,35 +209,12 @@ def _get_features_dense(
     )
 
 
-def _get_features_sparse(
-    S: th.Tensor,
-    score: th.Tensor,
-    X: th.Tensor,
-    mask: th.Tensor,
-    top_k: int,
-    virtual_num: int,
-    virtual_atoms: th.Tensor,
-    num_rbf: int,
-    node_dist: bool,
-    node_angle: bool,
-    node_direct: bool,
-    edge_dist: bool,
-    edge_angle: bool,
-    edge_direct: bool,
-) -> list[th.Tensor]:
+def _get_features_sparse(*get_features_dense_outputs, mask) -> list[th.Tensor]:
     """Get the features for the model.
     WARNING!
     Edge encoding is (2, E) where 2 = (src, dst) in sparse mode.
     Equivalent dense mode is (B, N, K) where src -> dst is k -> n
-    Inputs:
-    * S: ???
-    * score: ???
-    * X: (B, N, C=4, D) coordinates of BB atoms
-    * mask: (B, N) float mask indicating valid (present, resolved AAs)
-    * top_k: int. number of neighbors to link.
-    * virtual_num: int. Number of virtual atoms.
-    * virtual_atoms: (virtual_num, 3) virtual atom positions.
-    * num_rbf: int. Number of RBFs for distance encoding.
+    Inputs: Outputs from `_get_features_dense`
     Outputs: (mask(B N), ...) for node data and (mask(B N K), ...) for edge data
     """
     (
@@ -254,22 +230,8 @@ def _get_features_sparse(
         decoding_order,
         node_mask,
         edge_mask,
-    ) = _get_features_dense(
-        S,
-        score,
-        X,
-        mask,
-        top_k,
-        virtual_num,
-        virtual_atoms,
-        num_rbf,
-        node_dist,
-        node_angle,
-        node_direct,
-        edge_dist,
-        edge_angle,
-        edge_direct,
-    )
+    ) = get_features_dense_outputs
+
     mask_bool, mask_attend = node_mask, edge_mask
     B, N = mask_bool.shape
 
