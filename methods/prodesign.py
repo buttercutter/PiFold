@@ -3,6 +3,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch as th
 import torch.nn as nn
 from torch_scatter import scatter_sum
 from tqdm import tqdm
@@ -256,8 +257,8 @@ class ProDesign(Base_method):
 
                 # += scatter_sum(cmp, S.long(), dim=0, dim_size=20)
                 # += scatter_sum(torch.ones_like(cmp), S.long(), dim=0, dim_size=20)
-                scatter_mat = th.zeros(20, b_.shape[0], device=cmp.device, dtype=cmp.dtype)
-                scatter_mat[S.long(), th.arange(b_.shape[0])] = 1
+                scatter_mat = th.zeros(20, cmp.shape[0], device=cmp.device, dtype=cmp.dtype)
+                scatter_mat[S.long(), th.arange(cmp.shape[0])] = 1
                 self.residue_type_cmp = scatter_mat @ cmp
                 self.residue_type_num = scatter_mat @ torch.ones_like(cmp)
 
