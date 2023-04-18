@@ -91,7 +91,7 @@ class NeighborAttention(nn.Module):
         w.masked_fill_(~edge_mask.unsqueeze(-1), max_neg)
 
         attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
-        h_V = (attend * V).sum(dim=-3).reshape(b, n, -1) # (b, n, d)
+        h_V = (attend * V).sum(dim=-3).view(b, n, -1) # (b, n, d)
 
         # print("h_V", h_V[:5, :5])
 
@@ -124,7 +124,7 @@ class NeighborAttention(nn.Module):
         # (E, heads, 1)
         attend = scatter_softmax(w, index=center_id, dim=0)
         # (E, heads, d) * (E, heads, 1) -> (N, heads * d)
-        h_V = scatter_sum(attend * V, center_id, dim=0).reshape(h_V.shape[0], -1)
+        h_V = scatter_sum(attend * V, center_id, dim=0).view(h_V.shape[0], -1)
 
         h_V_update = h_V
         if self.output_mlp:
