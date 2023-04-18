@@ -93,8 +93,6 @@ class NeighborAttention(nn.Module):
         attend = w.softmax(dim=-2)[..., None]  # (b, n, k, h, ())
         h_V = (attend * V).sum(dim=-3).view(b, n, -1) # (b, n, d)
 
-        # print("h_V", h_V[:5, :5])
-
         h_V_update = h_V
         if self.output_mlp:
             h_V_update = self.W_O(h_V)
@@ -115,7 +113,6 @@ class NeighborAttention(nn.Module):
         d = int(self.num_hidden / n_heads)
 
         # (N,d1), (E,d2) -> (E,d1), (E,d2) -> (E,d1+d2) -> (E, heads, 1)
-        pre_w = th.cat([h_V[center_id], h_E], dim=-1)
         w = self.Bias(th.cat([h_V[center_id], h_E], dim=-1)).mul_(1/d**0.5)
         w = w.view(E, n_heads, 1)
         # (E, d2) -> (E, heads, d)
