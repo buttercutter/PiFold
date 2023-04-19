@@ -403,6 +403,7 @@ class StructureEncoder(nn.Module):
     ):
         """Graph labeling network"""
         super(StructureEncoder, self).__init__()
+        self.num_encoder_layers = num_encoder_layers
         self.checkpoint = checkpoint
 
         encoder_layers = []
@@ -440,8 +441,8 @@ class StructureEncoder(nn.Module):
         * node_mask: (B, N), node mask. required if mode == "dense"
         * edge_mask: (B, E), edge mask. required if mode == "dense"
         """
-        for layer in self.encoder_layers:
-            if self.checkpoint:
+        for i,layer in enumerate(self.encoder_layers):
+            if self.checkpoint and i != self.num_encoder_layers - 1:
                 h_V, h_P = checkpoint.checkpoint(
                     layer,
                     h_V,

@@ -60,9 +60,9 @@ def _hbonds(
     )
     U = (0.084 * 332) * (
         safe_cdist(O_atoms, N_atoms).add_(eps).reciprocal_()
-        + safe_cdist(C_atoms, N_atoms).add_(eps).reciprocal_()
+        + safe_cdist(C_atoms, H_atoms).add_(eps).reciprocal_()
         - safe_cdist(O_atoms, H_atoms).add_(eps).reciprocal_()
-        - safe_cdist(C_atoms, H_atoms).add_(eps).reciprocal_()
+        - safe_cdist(C_atoms, N_atoms).add_(eps).reciprocal_()
     )
     HB = (U < -0.5).type(torch.float32)  # (b, n, n)
     neighbor_HB = mask_neighbors * batched_index_select(HB, E_idx, dim=-1)  # (b, n, k)

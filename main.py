@@ -113,7 +113,7 @@ class Exp:
         self._build_method()
 
     def _build_method(self):
-        steps_per_epoch = 2000  # 1000
+        steps_per_epoch = 1000 # 2000  # 1000
         if self.args.method == "ProDesign":
             self.method = ProDesign(self.args, self.device, steps_per_epoch)
 
