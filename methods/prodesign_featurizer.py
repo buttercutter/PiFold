@@ -61,7 +61,7 @@ def _get_features_dense(
 ) -> list[th.Tensor]:
     """Get the features for the model.
     Inputs:
-    * S: ???
+    * S: (B, N) protein sequence as integers.
     * score: ???
     * X: (B, N, C=4, D) coordinates of BB atoms
     * mask: (B, N) float mask indicating valid (present, resolved AAs)
@@ -86,10 +86,10 @@ def _get_features_dense(
     randn = th.rand(mask.shape, device=X.device).add_(5).abs()
     # Our mask=1 represents available data, vs the protein MPP's mask=1 which represents unavailable data
     decoding_order = th.argsort(-mask * randn)
-    # Calc mask from q to p, given the known q
     permutation_matrix_reverse = th.nn.functional.one_hot(
         decoding_order, num_classes=N
     ).float()
+    # Calc mask from q to p, given the known q
     order_mask_backward = th.einsum(
         "ij, biq, bjp->bqp",
         th.tril(th.ones(N, N, device=device, dtype=permutation_matrix_reverse.dtype)),

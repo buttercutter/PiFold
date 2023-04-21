@@ -148,7 +148,7 @@ def _orientations_coarse_gl_tuple(
     2. Compute Reldists (dX)
     3. Compute Relorients (dU)
     4. Normalize (E_direct)
-    5. ???
+    5. Compute the NCO relpos in the reference frame (V_direct)
 
     Inputs:
     * X: [B, N, C, 3]
@@ -156,12 +156,10 @@ def _orientations_coarse_gl_tuple(
     Outputs:
     * V_direct: [B, N, 3, 3] NCO relpos in CA frame ???
     * E_direct: [B, N, K, ???]
-    * q: [???, 4] quaternion
+    * q: [B, N, K, 4] quaternion
     """
     V = X.clone()
     X = X[:, :, :3, :].reshape(X.shape[0], 3 * X.shape[1], 3)  # (b, (n c), 3)
-    # TODO: hypnopump@ compute frames only once per protein
-    # FIXME: hypnopump@ unpack and compute frames properly, this is ilegible lol
     dX = X[:, 1:, :] - X[:, :-1, :]  # CA-N, C-CA, N-C, CA-N...
     U = _normalize(dX, dim=-1)
     u_0, u_1 = U[:, :-2, :], U[:, 1:-1, :]
@@ -194,7 +192,7 @@ def _orientations_coarse_gl_tuple(
     E_direct = E_direct.reshape(B, N, K, -1)
     R = torch.matmul(Q.transpose(-1, -2), Q_neighbors)
     q = _quaternions(R)
-    # edge_feat = torch.cat((dU, q), dim=-1) # 相对方向向量+旋转四元数
+    # edge_feat = torch.cat((dU, q), dim=-1) # Relative direction vector + rotation quaternion
 
     # NCO relpos in frame
     dX_inner = V[:, :, [0, 2, 3], :] - X.unsqueeze(-2)
