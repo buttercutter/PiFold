@@ -11,7 +11,7 @@ import torch.utils.data as data
 class TS(data.Dataset):
     def __init__(self, path="./"):
         if not os.path.exists(path):
-            raise "no such file:{} !!!".format(path)
+            raise ValueError(f"no such file:{path} !!!")
         else:
             ts50_data = json.load(open(path + "/ts50.json"))
             ts500_data = json.load(open(path + "/ts500.json"))
@@ -46,6 +46,8 @@ class TS(data.Dataset):
                     "category": "ts500",
                 }
             )
+
+        self.data = sorted(self.data, key=lambda x: len(x["seq"]))
 
     def __len__(self):
         return len(self.data)

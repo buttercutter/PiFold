@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+from functools import lru_cache
 
 import numpy as np
 import torch.utils.data as data
@@ -29,7 +30,7 @@ class CATH(data.Dataset):
     def cache_data(self):
         alphabet_set = set(ALPHABET)
         if not os.path.exists(self.path):
-            raise "no such file:{} !!!".format(self.path)
+            raise ValueError(f"no such file:{self.path} !!!")
         else:
             with open(self.path + "/chain_set.jsonl") as f:
                 lines = f.readlines()
@@ -71,6 +72,9 @@ class CATH(data.Dataset):
             name2set.update({name: "train" for name in dataset_splits["train"]})
             name2set.update({name: "valid" for name in dataset_splits["validation"]})
             name2set.update({name: "test" for name in dataset_splits["test"]})
+
+            # sort dataset by length:
+            data_list = sorted(data_list, key=lambda x: len(x["seq"]))
 
             data_dict = {"train": [], "valid": [], "test": []}
             for data in data_list:
