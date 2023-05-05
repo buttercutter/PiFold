@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import logging
 import os.path as osp
@@ -5,11 +6,13 @@ import pickle
 import warnings
 
 import torch
+from typing import Any
 
 warnings.filterwarnings("ignore")
 
 import logging
 from pathlib import Path
+
 from API import Recorder
 from methods import ProDesign
 from utils import *
@@ -26,6 +29,54 @@ class Exp:
         self._preparation()
         if show_params:
             print_log(output_namespace(self.args))
+
+
+    def recursive_set_(self, arg_name: str, new_value: Any) -> Exp:
+        """ Recursively sets arg to the module and nn.Module children """
+        # to self
+        if arg_name in self.args.__dict__:
+            self.args.__dict__[arg_name] = new_value
+        # to method
+        if arg_name in self.method.args.__dict__:
+            self.method.args.__dict__[arg_name] = new_value
+        # to model
+        if arg_name in self.method.model.args.__dict__:
+            self.method.model.args.__dict__[arg_name] = new_value
+        # to decoder. Attr, no longer a dict
+        if arg_name in self.method.model.decoder.__dict__:
+            self.method.model.decoder.__dict__[arg_name] = new_value
+        # to encoder
+        if arg_name in self.method.model.encoder.__dict__:
+            self.method.model.encoder.__dict__[arg_name] = new_value
+        # to encoder layers
+        for i,layer in enumerate(self.method.model.encoder.encoder_layers):
+            if arg_name in layer.__dict__:
+                self.method.model.encoder.encoder_layers[i].__dict__[arg_name] = new_value
+            # to encoder edge_update
+            if arg_name in layer.edge_update.__dict__:
+                self.method.model.encoder.encoder_layers[i].edge_update.__dict__[arg_name] = new_value
+                self.method.model.encoder.encoder_layers[i].edge_update.norm.__dict__[arg_name] = new_value
+            # to encoder context
+            if arg_name in layer.context.__dict__:
+                self.method.model.encoder.encoder_layers[i].context.__dict__[arg_name] = new_value
+            # to encoder context
+            if arg_name in layer.attention.__dict__:
+                self.method.model.encoder.encoder_layers[i].attention.__dict__[arg_name] = new_value
+            # to encoder norms
+            for j, norm in enumerate(layer.norm):
+                if arg_name in norm.__dict__:
+                    self.method.model.encoder.encoder_layers[i].norm[j].__dict__[arg_name] = new_value
+        # to embedding norms
+        if arg_name in self.method.model.norm_nodes.__dict__:
+            self.method.model.norm_nodes.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.norm_edges.__dict__:
+            self.method.model.norm_edges.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.W_v_norm1.__dict__:
+            self.method.model.W_v_norm1.__dict__[arg_name] = new_value
+        if arg_name in self.method.model.W_v_norm2.__dict__:
+            self.method.model.W_v_norm2.__dict__[arg_name] = new_value
+
+        return self
 
     def _acquire_device(self):
         if self.args.use_gpu:
@@ -62,7 +113,7 @@ class Exp:
         self._build_method()
 
     def _build_method(self):
-        steps_per_epoch = 1000
+        steps_per_epoch = 1000 # 2000  # 1000
         if self.args.method == "ProDesign":
             self.method = ProDesign(self.args, self.device, steps_per_epoch)
 
@@ -70,9 +121,13 @@ class Exp:
         if self.args.from_pretrained is not None:
             if Path.isfile(self.args.pretrained_model):
                 logger.info(f"Loading checkpoint '{self.args.pretrained_model}'")
-                self.method.model.load_state_dict(torch.load(self.args.pretrained_model, map_location=self.device))
+                self.method.model.load_state_dict(
+                    torch.load(self.args.pretrained_model, map_location=self.device)
+                )
             else:
-                logger.error(f"Could not load '{self.args.pretrained_model}' and starting from scratch")
+                logger.error(
+                    f"Could not load '{self.args.pretrained_model}' and starting from scratch"
+                )
 
     def _get_data(self):
         data = get_dataset(self.config)
@@ -85,7 +140,7 @@ class Exp:
                 self.train_loader
             )
 
-            if args.wandb_project:
+            if self.args.wandb_project:
                 train_log = {
                     "Train/Loss": train_loss,
                     "Train/Perplexity": train_perplexity,
@@ -171,11 +226,11 @@ class Exp:
         return test_perplexity, test_recovery, test_subcat_recovery
 
     def init_logger(self, config: dict) -> None:
-        if args.wandb_project:
-            wandb.init(project=args.wandb_project, config=config)
+        if self.args.wandb_project:
+            wandb.init(project=self.args.wandb_project, config=config)
 
     def end_logger(self, test_perp: float, test_rec: float) -> None:
-        if args.wandb_project:
+        if self.args.wandb_project:
             wandb.summary["test_perplexity"] = test_perp
             wandb.summary["test_recovery"] = test_rec
             wandb.finish()
@@ -184,7 +239,7 @@ class Exp:
 if __name__ == "__main__":
     from parser import create_parser
 
-    args = create_parser()
+    args = create_parser().parse_args()
     config = args.__dict__
 
     if args.wandb_project:
@@ -206,4 +261,4 @@ if __name__ == "__main__":
 
     print(">>>>>>>>>>>>>>>>>>>>>>>>>> testing  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
     test_perp, test_rec, test_subcat_recovery = exp.test()
-    exp.end_logger()
+    exp.end_logger(test_perp, test_rec)

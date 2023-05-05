@@ -18,7 +18,7 @@ def create_parser():
     )
     parser.add_argument("--res_dir", default="./results", type=str)
     parser.add_argument("--ex_name", default="debug", type=str)
-    parser.add_argument("--use_gpu", default=True, type=bool)
+    parser.add_argument("--use_gpu", default=1, type=int, help="Use GPU (1) or not (0)")
     parser.add_argument("--gpu", default=0, type=int)
     parser.add_argument("--seed", default=111, type=int)
 
@@ -37,6 +37,7 @@ def create_parser():
     # method parameters
     parser.add_argument("--method", default="ProDesign", choices=["ProDesign"])
     parser.add_argument("--config_file", "-c", default=None, type=str)
+    parser.add_argument("--num_heads", default=4, type=int)
     parser.add_argument("--hidden_dim", default=128, type=int)
     parser.add_argument("--node_features", default=128, type=int)
     parser.add_argument("--edge_features", default=128, type=int)
@@ -50,6 +51,12 @@ def create_parser():
         help="Per encoder layer checkpointing to reduce mem usage",
     )
     parser.add_argument("--from_pretrained", default=None, type=str)
+    parser.add_argument(
+        "--norm_choice",
+        default="batchnorm",
+        type=str,
+        choices=["batchnorm", "layernorm", "none"],
+    )
 
     # Training parameters
     parser.add_argument("--epoch", default=100, type=int, help="end epoch")
@@ -62,6 +69,17 @@ def create_parser():
         type=int,
         help="test every epoch or just on new best model",
     )
+    parser.add_argument(
+        "--train_mode",
+        default="sparse",
+        type=str,
+        choices=["sparse", "dense"],
+        help=(
+            "sparse training (fuse batch dims into one example, index edges and scttered reductions)"
+            "or dense (keeps batches, masks)."
+            "Dense uses more compute, its faster. Sparse use more memacess, its slower."
+        ),
+    )
 
     # ProDesign parameters
     parser.add_argument("--updating_edges", default=4, type=int)
@@ -73,4 +91,4 @@ def create_parser():
     parser.add_argument("--edge_direct", default=1, type=int)
     parser.add_argument("--virtual_num", default=3, type=int)
 
-    return parser.parse_args()
+    return parser

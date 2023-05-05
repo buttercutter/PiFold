@@ -7,4 +7,5 @@ from .simdesign_utils import (
     _orientations_coarse_gl_tuple,
     _rbf,
     gather_nodes,
+    batched_index_select,
 )

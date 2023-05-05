@@ -20,7 +20,7 @@ Notation:
 """
 
 
-def safe_cdist(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+def safe_cdist(X: th.Tensor, Y: th.Tensor, eps: float = 1e-7) -> th.Tensor:
     """Manual op is faster on CUDA than torch.cdist (no matmul as numerical precision issues).
     (but not in ARM CPU, where cpu kernel is faster).
     """
@@ -60,9 +60,9 @@ def _hbonds(
     )
     U = (0.084 * 332) * (
         safe_cdist(O_atoms, N_atoms).add_(eps).reciprocal_()
-        + safe_cdist(C_atoms, N_atoms).add_(eps).reciprocal_()
+        + safe_cdist(C_atoms, H_atoms).add_(eps).reciprocal_()
         - safe_cdist(O_atoms, H_atoms).add_(eps).reciprocal_()
-        - safe_cdist(C_atoms, H_atoms).add_(eps).reciprocal_()
+        - safe_cdist(C_atoms, N_atoms).add_(eps).reciprocal_()
     )
     HB = (U < -0.5).type(torch.float32)  # (b, n, n)
     neighbor_HB = mask_neighbors * batched_index_select(HB, E_idx, dim=-1)  # (b, n, k)
@@ -212,7 +212,7 @@ def batched_index_select(values: th.Tensor, indices: th.Tensor, dim=1) -> th.Ten
     * indices: (..., k, iii) th.Tensor. iii is any number of dims
     Outputs: (..., k, iii, vvv)
     """
-    vdim = dim if dim > 0 else values.ndim + dim
+    vdim = dim if dim >= 0 else values.ndim + dim
     values_shape, indices_shape = map(lambda x: list(x.shape), (values, indices))
     extra_value_dims, extra_indices_dims = map(
         lambda x: x[vdim + 1 :], (values_shape, indices_shape)
@@ -221,14 +221,14 @@ def batched_index_select(values: th.Tensor, indices: th.Tensor, dim=1) -> th.Ten
     indices = indices[(..., *((None,) * len(extra_value_dims)))]
     # (..., n, vvv) -> (..., n, iii, vvv)
     values = values[
-        (*((slice(None),) * (dim + 1)), *((None,) * len(extra_indices_dims)), ...)
+        (*((slice(None),) * (vdim + 1)), *((None,) * len(extra_indices_dims)), ...)
     ]
     # expand to match shapes except dim
     indices = indices.expand(*((-1,) * len(indices_shape)), *extra_value_dims)
     values = values.expand(
         *(-1,) * (vdim + 1), *extra_indices_dims, *(-1,) * len(extra_value_dims)
     )
-    return values.gather(dim, indices)
+    return values.gather(vdim, indices)
 
 
 def gather_edges(edges: torch.Tensor, neighbor_idx: torch.Tensor) -> torch.Tensor:
