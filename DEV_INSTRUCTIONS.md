@@ -14,7 +14,7 @@ Use git as always, if linting modifies any file, the commit will be rejected, so
 After `git clone <repo>` and `cd <repo>`, run:
 
 ```
-mkdir -p data/cath                                                                                                                                                          
+mkdir -p data/cath
 mkdir -p data/ts
 wget -O data/cath.zip https://github.com/A4Bio/PiFold/releases/download/Training%26Data/cath4.2.zip
 unzip -o data/cath.zip -d data/cath
@@ -27,4 +27,11 @@ unzip -o data/ts.zip -d data/
 mkdir -p results/PiFold
 wget -O results/PiFold/checkpoint.pth https://github.com/A4Bio/PiFold/releases/download/Training%26Data/checkpoint.pth
 
+```
+
+
+### Training command
+
+```
+python main.py --use_gpu 1 --gpu 0 --seed 17 --wandb_project PiFold-repro --checkpoint 1 --train_mode sparse
 ```
