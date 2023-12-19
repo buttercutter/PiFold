@@ -822,6 +822,7 @@ rigid_group_atom_positions = {
         ["N", 0, (-0.572, 1.337, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.517, -0.000, -0.000)],
+        [],
         ["O", 3, (0.626, 1.062, -0.000)],
     ],
     "H": [
@@ -967,9 +968,12 @@ aa_bb_positions = [
             rigid_group_atom_positions[aa][0][-1],  # N
             rigid_group_atom_positions[aa][1][-1],  # CA
             rigid_group_atom_positions[aa][2][-1],  # C
-            rigid_group_atom_positions[aa][3][-1],  # O
+            rigid_group_atom_positions[aa][4][-1],  # O
         ]
     ).float()
     for aa in ALPHABET
 ]
 aa_bb_positions = torch.stack(aa_bb_positions, dim=0)
+aa_bb_positions_mean = torch.ones_like(aa_bb_positions) * aa_bb_positions.mean(
+    dim=0, keepdim=True
+)

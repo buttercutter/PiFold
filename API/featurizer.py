@@ -1,7 +1,7 @@
 import numpy as np
 import torch as th
 
-from .frame import A2I, ALPHABET, Frame, aa_bb_positions
+from .frame import A2I, ALPHABET, Frame, aa_bb_positions, aa_bb_positions_mean
 
 
 def encode_bb_af2(x: th.Tensor) -> Frame:
@@ -18,7 +18,8 @@ def encode_bb_af2(x: th.Tensor) -> Frame:
 def decode_bb_af2(frames: Frame, idxs: th.Tensor, mask: th.Tensor) -> th.Tensor:
     """Rebuilds the backbone for a given peptide sequence with AF2 frames.
     # TODO: check if AF2 standard params leak perfect information into pifold ???
-    # TODO: check composition with tiny noise later ???
+    # FIXME: checked. yes it leaks and its separable in 1 epoch
+    # TODO: fold all to same frame: mean
     Inputs:
     * frames: (B, L)
     * idxs: (B, L) aa idxs
@@ -26,7 +27,8 @@ def decode_bb_af2(frames: Frame, idxs: th.Tensor, mask: th.Tensor) -> th.Tensor:
     Outputs: (B, L, 4, D); 4 = N, CA, C, O
     """
     # (B, L) -> (B, L, 4, D)
-    pos = aa_bb_positions[idxs]
+    # pos = aa_bb_positions[idxs]
+    pos = aa_bb_positions_mean[idxs]
     # (B, L), (B, L, 4, D) -> (B, L, 4, D)
     x = frames[..., None].apply(pos)
     # (B, L, 4, D), (B, L) -> (B, L, 4, 3)
