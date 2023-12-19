@@ -105,7 +105,10 @@ def featurize_GTrans(batch: list, shuffle_fraction: float = 0.0) -> list:
 
     # encode in AF2-like frames, then decode. AF2 has per-res params so might leak
     # X: (b, l, 4, 3) -> (b, l, 4, 3)
-    X = decode_bb_af2(encode_bb_af2(X), S, mask)
+    # X = decode_bb_af2(encode_bb_af2(X), S, mask)
+
+    # noises af2 frames (orientations + global translations) a bit
+    X = decode_bb_af2(encode_bb_af2(X + th.randn_like(X) * 0.1), S, mask)
 
     # add noise to coordinates for robustness training
     # X = X + th.randn_like(X) * 0.1
