@@ -33,5 +33,5 @@ wget -O results/PiFold/checkpoint.pth https://github.com/A4Bio/PiFold/releases/d
 ### Training command
 
 ```
-python main.py --use_gpu 1 --gpu 0 --seed 17 --wandb_project PiFold-repro --checkpoint 1 --train_mode sparse
+python main.py --use_gpu 1 --gpu 0 --seed 17 --wandb_project PiFold-repro --checkpoint 1 --train_mode sparse --num_encoder_layers 6
 ```

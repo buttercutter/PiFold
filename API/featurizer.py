@@ -71,4 +71,7 @@ def featurize_GTrans(batch: list, shuffle_fraction: float = 0.0) -> list:
     score = torch.from_numpy(score).float()
     X = torch.from_numpy(X).to(dtype=torch.float32)
     mask = torch.from_numpy(mask).to(dtype=torch.float32)
+
+    # add noise to coordinates for robustness training
+    X = X + torch.randn_like(X) * 0.2
     return X, S, score, mask, lengths
