@@ -1,8 +1,37 @@
 import numpy as np
-import torch
+import torch as th
 
-ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
-A2I = {a: i for i, a in enumerate(ALPHABET)}
+from .frame import A2I, ALPHABET, Frame, aa_bb_positions
+
+
+def encode_bb_af2(x: th.Tensor) -> Frame:
+    """Inputs: (B, L, 4, D) -> Outputs: (B, L); 4 = N, CA, C, O"""
+    frames = Frame.make_transform_from_reference(
+        n_xyz=x[..., 0, :],
+        ca_xyz=x[..., 1, :],
+        c_xyz=x[..., 2, :],
+        eps=1e-12,
+    )
+    return frames
+
+
+def decode_bb_af2(frames: Frame, idxs: th.Tensor, mask: th.Tensor) -> th.Tensor:
+    """Rebuilds the backbone for a given peptide sequence with AF2 frames.
+    # TODO: check if AF2 standard params leak perfect information into pifold ???
+    # TODO: check composition with tiny noise later ???
+    Inputs:
+    * frames: (B, L)
+    * idxs: (B, L) aa idxs
+    * mask: (B, L)
+    Outputs: (B, L, 4, D); 4 = N, CA, C, O
+    """
+    # (B, L) -> (B, L, 4, D)
+    pos = aa_bb_positions[idxs]
+    # (B, L), (B, L, 4, D) -> (B, L, 4, D)
+    x = frames[..., None].apply(pos)
+    # (B, L, 4, D), (B, L) -> (B, L, 4, 3)
+    x = x * mask.float()[..., None, None]
+    return x
 
 
 def shuffle_subset(n, p):
@@ -67,11 +96,16 @@ def featurize_GTrans(batch: list, shuffle_fraction: float = 0.0) -> list:
     mask = np.isfinite(np.sum(X, (2, 3))).astype(np.float32)
     X[isnan] = 0.0
     # Conversion
-    S = torch.from_numpy(S).to(dtype=torch.long)
-    score = torch.from_numpy(score).float()
-    X = torch.from_numpy(X).to(dtype=torch.float32)
-    mask = torch.from_numpy(mask).to(dtype=torch.float32)
+    S = th.from_numpy(S).to(dtype=th.long)
+    score = th.from_numpy(score).float()
+    X = th.from_numpy(X).to(dtype=th.float32)
+    mask = th.from_numpy(mask).to(dtype=th.float32)
+
+    # encode in AF2-like frames, then decode. AF2 has per-res params so might leak
+    # X: (b, l, 4, 3) -> (b, l, 4, 3)
+    X = decode_bb_af2(encode_bb_af2(X), S, mask)
 
     # add noise to coordinates for robustness training
-    X = X + torch.randn_like(X) * 0.2
+    # X = X + th.randn_like(X) * 0.1
+
     return X, S, score, mask, lengths
